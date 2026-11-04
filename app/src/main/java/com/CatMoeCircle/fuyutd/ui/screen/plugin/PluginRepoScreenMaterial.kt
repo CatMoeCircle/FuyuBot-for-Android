@@ -34,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -183,11 +184,17 @@ fun PluginRepoScreenMaterial(
                 shape = RoundedCornerShape(28.dp),
             )
 
-            RepoListMaterial(
-                uiState = uiState,
-                actions = actions,
-                nestedScrollConnection = scrollBehavior.nestedScrollConnection,
-            )
+            PullToRefreshBox(
+                isRefreshing = uiState.loading,
+                onRefresh = actions.onRefresh,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                RepoListMaterial(
+                    uiState = uiState,
+                    actions = actions,
+                    nestedScrollConnection = scrollBehavior.nestedScrollConnection,
+                )
+            }
         }
     }
 }

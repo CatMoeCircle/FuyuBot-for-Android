@@ -51,6 +51,7 @@ import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.PopupPositionProvider
+import top.yukonga.miuix.kmp.basic.PullToRefresh
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SearchBar
 import top.yukonga.miuix.kmp.basic.Text
@@ -145,11 +146,24 @@ fun PluginRepoScreenMiuix(
                     content = { },
                 )
 
-                RepoListMiuix(
-                    uiState = uiState,
-                    actions = actions,
-                    nestedScrollConnection = scrollBehavior.nestedScrollConnection,
-                )
+                PullToRefresh(
+                    isRefreshing = uiState.loading,
+                    onRefresh = actions.onRefresh,
+                    modifier = Modifier.fillMaxSize(),
+                    topAppBarScrollBehavior = scrollBehavior,
+                    refreshTexts = listOf(
+                        stringResource(R.string.plugin_pull_to_refresh),
+                        stringResource(R.string.plugin_release_to_refresh),
+                        stringResource(R.string.plugin_refreshing),
+                        stringResource(R.string.plugin_refreshed),
+                    ),
+                ) {
+                    RepoListMiuix(
+                        uiState = uiState,
+                        actions = actions,
+                        nestedScrollConnection = scrollBehavior.nestedScrollConnection,
+                    )
+                }
             }
         }
     }
