@@ -1,0 +1,71 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# ---------------------------------------------------------------------------
+# 换行符过滤
+# ---------------------------------------------------------------------------
+# 可执行脚本必须保持 LF，否则在 Git Bash / CI 中会执行失败
+gradlew text eol=lf
+*.sh    text eol=lf
+
+# Windows 批处理必须保持 CRLF
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# 源码与配置统一 LF，避免 Windows 检出后产生整文件 diff
+*.kt           text eol=lf
+*.kts          text eol=lf
+*.java         text eol=lf
+*.xml          text eol=lf
+*.json         text eol=lf
+*.toml         text eol=lf
+*.pro          text eol=lf
+*.properties   text eol=lf
+*.md           text eol=lf
+*.txt          text eol=lf
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+
+# ---------------------------------------------------------------------------
+# 二进制过滤：不按文本处理，也不做 diff / merge
+# ---------------------------------------------------------------------------
+# 图片
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.bmp  binary
+*.ico  binary
+*.svg  text eol=lf
+
+# 字体
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
+
+# 构建产物与依赖包
+*.jar   binary
+*.aar   binary
+*.apk   binary
+*.aab   binary
+*.zip   binary
+*.gz    binary
+*.7z    binary
+*.so    binary
+*.dll   binary
+*.dylib binary
+*.exe   binary
+*.class binary
+*.dex   binary
+
+# 签名与密钥
+*.jks      binary
+*.keystore binary
+
+# 音视频
+*.mp3  binary
+*.mp4  binary
+*.wav  binary
+*.webm binary

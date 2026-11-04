@@ -1,0 +1,20 @@
+# Gradle / AGP 构建产物
+/build/
+/app/build/
+/app/release/
+.gradle/
+.kotlin/
+
+# 本机环境配置（含 SDK 路径，不可提交）
+local.properties
+
+# 内置内核等 assets（另行分发，不入库）
+/app/src/main/assets/
+
+# Android Studio / IntelliJ 工程目录（含 workspace.xml、caches 等本机文件）
+/.idea/
+*.iml
+
+# 系统杂项
+.DS_Store
+Thumbs.db
