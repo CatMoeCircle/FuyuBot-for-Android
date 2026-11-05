@@ -31,7 +31,7 @@
     <string name="home_plugin_count">插件数量</string>
     <string name="home_plugins">插件</string>
     <string name="home_tdlib">TDLib 状态</string>
-    <string name="home_tdlib_not_reported">尚未上报</string>
+    <string name="home_tdlib_not_reported">尚未启动</string>
     <string name="home_tdlib_wait_tdlib_parameters">初始化</string>
     <string name="home_tdlib_wait_phone_number">等待手机号</string>
     <string name="home_tdlib_wait_other_device_confirmation">等待其他设备确认</string>
@@ -46,6 +46,15 @@
     <string name="home_tdlib_closing">正在关闭</string>
     <string name="home_tdlib_closed">会话已关闭</string>
     <string name="home_tdlib_unknown">未知状态</string>
+    <string name="home_tdlib_needs_relogin">账号已下线，需要重新登录</string>
+    <string name="home_connection">连接</string>
+    <string name="home_connection_not_reported">尚未启动</string>
+    <string name="home_connection_waiting_network">等待网络</string>
+    <string name="home_connection_connecting_proxy">通过代理连接</string>
+    <string name="home_connection_connecting">连接中</string>
+    <string name="home_connection_updating">正在同步</string>
+    <string name="home_connection_ready">已连接</string>
+    <string name="home_connection_unknown">未知状态</string>
     <string name="home_tdlib_hint_wait_tdlib_parameters">正在初始化 TDLib，请稍候</string>
     <string name="home_tdlib_hint_wait_phone_number">请在登录弹窗里填写手机号（含国家码）</string>
     <string name="home_tdlib_hint_wait_code">验证码已发出，请在登录弹窗里填写</string>
@@ -53,6 +62,7 @@
     <string name="home_tdlib_hint_wait_other_device_confirmation">本应用暂不支持扫码登录，请改用手机号登录</string>
     <string name="home_plugins_loaded">已加载的插件</string>
     <string name="home_plugins_failed">失败的插件</string>
+    <string name="home_plugins_skipped">跳过的插件</string>
     <string name="home_unit_count">个</string>
     <string name="home_start">启动</string>
     <string name="home_stop">停止</string>
@@ -177,7 +187,6 @@
     <string name="plugin_repo_sort_by_name">按名称排序</string>
     <string name="plugin_repo_search_placeholder">搜索插件</string>
     <string name="plugin_reboot">重启内核</string>
-    <string name="plugin_reboot_desc">重启内核以应用插件更改</string>
     <string name="plugin_undo">撤销</string>
     <string name="plugin_pull_to_refresh">下拉刷新</string>
     <string name="plugin_release_to_refresh">松开刷新</string>

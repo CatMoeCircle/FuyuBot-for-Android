@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 插件页展示内核真实插件状态（徽标 / 跳过原因 / 未注册条目）用的文案。 -->
+<resources>
+    <!-- 内核插件状态徽标 -->
+    <string name="plugin_kernel_state_active">已加载</string>
+    <string name="plugin_kernel_state_pending">待依赖</string>
+    <string name="plugin_kernel_state_activating">加载中</string>
+    <string name="plugin_kernel_state_failed">加载失败</string>
+    <string name="plugin_kernel_state_unknown">状态未知</string>
+
+    <!-- 单个插件的内核信息 -->
+    <string name="plugin_kernel_reason">原因：%1$s</string>
+    <string name="plugin_kernel_missing">缺少能力：%1$s</string>
+    <string name="plugin_kernel_file">文件：%1$s</string>
+
+    <!-- 内核跳过的插件区块 -->
+    <string name="plugin_kernel_skipped_title">内核跳过的插件</string>
+    <string name="plugin_kernel_skipped_desc">内核在插件目录里扫到但没加载，常见原因是架构不符、依赖缺失或脚本放错位置</string>
+
+    <!-- 内核已加载但不在本机注册表的区块 -->
+    <string name="plugin_kernel_orphans_title">内核已加载但未在本机注册</string>
+    <string name="plugin_kernel_orphans_desc">内核里跑着、但本机注册表里没有对应条目，不影响运行</string>
+</resources>

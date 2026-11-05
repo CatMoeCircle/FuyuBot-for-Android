@@ -14,6 +14,7 @@ import com.CatMoeCircle.fuyutd.data.kernel.LogRepository
 import com.CatMoeCircle.fuyutd.data.plugin.PluginStore
 import com.CatMoeCircle.fuyutd.ui.screen.home.HomeUiState
 import com.CatMoeCircle.fuyutd.ui.screen.home.TdlibAuthState
+import com.CatMoeCircle.fuyutd.ui.screen.home.TdlibConnectionState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -43,7 +44,9 @@ import java.util.Locale
 class HomeViewModel : ViewModel() {
 
     private val config = FuyuBotConfigRepository()
-    private val runtime = FuyuBotRuntime(config)
+    // 进程级单例：前台 Service 与 Activity 重建后的新 ViewModel 共用同一个运行时，
+    // 状态与回调不会随界面重建而丢失。
+    private val runtime = FuyuBotRuntime.instance()
     private var appContext: Context? = null
 
     private val _configDialog = MutableStateFlow(false)
@@ -91,7 +94,7 @@ class HomeViewModel : ViewModel() {
     }
 
     private var startJob: Job? = null
-    private var authJob: Job? = null
+    private var statusJob: Job? = null
     private var prepareJob: Job? = null
     private var accountJob: Job? = null
     private var restartJob: Job? = null
@@ -102,14 +105,8 @@ class HomeViewModel : ViewModel() {
     /** 已安装内核的插件数量；内核未安装时为 null。 */
     private val pluginCount = MutableStateFlow<Int?>(null)
 
-    /** 日志里的真实授权状态；null 表示本次启动还没读到。 */
-    private val authState = MutableStateFlow<AuthSnapshot?>(null)
-
     /** `getMe` 拿到的账户信息；null 表示还没取到（未登录 / 请求失败）。 */
     private val account = MutableStateFlow(FuyuBotAccountStore.load())
-
-    /** 只解析这个偏移之后写入的日志；null 表示还没定起点。 */
-    private var logMark: Long? = null
 
     /** 已经自动回答过「手机号登录」的提问 id；null 表示本次运行还没答过。 */
     private var autoAnsweredLoginMethodId: Int? = null
@@ -119,8 +116,9 @@ class HomeViewModel : ViewModel() {
         runtime.state,
         ticker(),
         pluginCount,
-        authState,
-    ) { runtimeState, _, pluginsOnDisk, auth ->
+    ) { runtimeState, _, pluginsOnDisk ->
+        val auth = runtimeState.authState
+        val connection = runtimeState.connectionState
         BaseHomeState(
             isRunning = runtimeState.state == FuyuBotState.READY ||
                     runtimeState.state == FuyuBotState.STARTING,
@@ -128,9 +126,16 @@ class HomeViewModel : ViewModel() {
             uptime = runtimeState.startedAtElapsedRealtime
                 ?.let { start -> formatUptime(SystemClock.elapsedRealtime() - start) }
                 ?: IDLE_UPTIME,
-            pluginCount = pluginsOnDisk,
-            authState = auth?.state ?: TdlibAuthState.NOT_REPORTED,
-            authStateRaw = auth?.raw ?: "",
+            // 运行中优先用内核扫到的数；还没拿到报告（未启动 / 刚启动）时退回磁盘文件数。
+            pluginCount = runtimeState.pluginStats?.scanned ?: pluginsOnDisk,
+            loadedPluginCount = runtimeState.pluginStats?.active,
+            failedPluginCount = runtimeState.pluginStats?.failed,
+            skippedPluginCount = runtimeState.pluginStats?.skipped,
+            authState = auth?.state?.let(TdlibAuthState::fromRaw) ?: TdlibAuthState.NOT_REPORTED,
+            // needs_re_login 在登录窗口里也是 true，只有「曾经 ready 过」才算被下线。
+            needsReLogin = auth?.needsReLogin == true && runtimeState.everReady,
+            connectionState = connection?.state?.let(TdlibConnectionState::fromRaw)
+                ?: TdlibConnectionState.NOT_REPORTED,
             tdlibDetail = runtimeState.stateDetail,
         )
     }
@@ -147,8 +152,12 @@ class HomeViewModel : ViewModel() {
             avatarPath = acc?.avatarPath,
             uptime = base.uptime,
             pluginCount = base.pluginCount,
+            loadedPluginCount = base.loadedPluginCount,
+            failedPluginCount = base.failedPluginCount,
+            skippedPluginCount = base.skippedPluginCount,
             authState = base.authState,
-            authStateRaw = base.authStateRaw,
+            needsReLogin = base.needsReLogin,
+            connectionState = base.connectionState,
             tdlibDetail = base.tdlibDetail,
         )
     }.stateIn(
@@ -176,11 +185,8 @@ class HomeViewModel : ViewModel() {
         prepareKernel(appContext)
         viewModelScope.launch(Dispatchers.IO) {
             pluginCount.value = KernelManager.pluginCount(appContext)
-            // 首次绑定时把起点定在日志末尾：本次进程还没启动过内核，
-            // 文件里剩下的都是上一次运行留下的旧授权状态，不能当成当前状态。
-            if (logMark == null) logMark = LogRepository.length(appContext)
         }
-        watchAuthState(appContext)
+        watchTdlibStatus()
         // 进程里可能早就跑起来了（例如界面被重建）：直接试一次，
         // 还没登录时 getMe 会失败并保持「未知」，不影响其它状态。
         if (runtime.isRunning) refreshAccount()
@@ -249,35 +255,19 @@ class HomeViewModel : ViewModel() {
     }
 
     /**
-     * 每秒从内核日志里读一次真实的授权状态。
+     * 每秒拉一次内核记的 TDLib 授权 / 连接状态。
      *
-     * 内核把 TDLib 的 `updateAuthorizationState` 打成 `授权状态：xxx`，
-     * 而 JNI 只回调内核线程的起停——所以这是唯一可信的来源。
-     * 不区分运行与否：停止过程中的 `authorizationStateClosing` / `Closed` 也要如实显示。
+     * 两个接口都是**内存快照**（不发 TDLib 请求、不阻塞），比之前「读日志尾巴 + 正则」
+     * 轻得多；而且登录窗口里也能拿到状态，不依赖日志行。
      */
-    private fun watchAuthState(appContext: Context) {
-        if (authJob?.isActive == true) return
-        authJob = viewModelScope.launch {
-            var lastLength = -1L
+    private fun watchTdlibStatus() {
+        if (statusJob?.isActive == true) return
+        statusJob = viewModelScope.launch {
             while (true) {
-                val mark = logMark
-                if (mark != null) {
-                    // 先比长度：日志没长就说明没有新状态，省掉每秒一次的内容读取。
-                    val length = withContext(Dispatchers.IO) {
-                        LogRepository.length(appContext)
-                    }
-                    if (length != lastLength) {
-                        lastLength = length
-                        val raw = withContext(Dispatchers.IO) {
-                            LogRepository.latestAuthState(appContext, mark)
-                        }
-                        if (raw != null && raw != authState.value?.raw) {
-                            authState.value = AuthSnapshot(raw, TdlibAuthState.fromRaw(raw))
-                            // 登录完成才有「当前用户」，这时取一次名字与头像。
-                            if (TdlibAuthState.fromRaw(raw) == TdlibAuthState.READY) refreshAccount()
-                        }
-                    }
-                }
+                val wasReady = runtime.state.value.authState?.ready == true
+                runtime.refreshTdlibStatus()
+                // 首次进入 Ready 才有「当前用户」，这时取一次名字与头像。
+                if (!wasReady && runtime.state.value.authState?.ready == true) refreshAccount()
                 delay(AUTH_TICK_MS)
             }
         }
@@ -312,13 +302,8 @@ class HomeViewModel : ViewModel() {
 
     private suspend fun doStart(context: Context) {
         // 每次启动都从干净日志开始：内核是追加写 fuyubot.log 的，不主动清掉的话，
-        // 上一次运行的授权状态、报错会一直混在本次日志里，看上去像这次的错。
-        // 清完把起点归零——本次启动写入的每一行都算「新日志」。
-        logMark = withContext(Dispatchers.IO) {
-            LogRepository.clear(context)
-            0L
-        }
-        authState.value = null
+        // 上一次运行的报错会一直混在本次日志里，看上去像这次的错。
+        withContext(Dispatchers.IO) { LogRepository.clear(context) }
         // 新的运行时会有新的提问 id，旧的那条不该再压制自动应答。
         autoAnsweredLoginMethodId = null
         runtime.start(context).fold(
@@ -350,15 +335,20 @@ class HomeViewModel : ViewModel() {
         _error.value = null
     }
 
-    /** 回答登录提问。 */
+    /** 回答登录提问；失败（提问 id 已失效 / 内核已停）经错误弹窗告知用户。 */
     fun answer(id: Int, text: String?) {
-        runtime.answer(id, text)
+        runtime.answer(id, text).onFailure { error ->
+            _error.value = HomeError.Runtime(error.message ?: error.javaClass.simpleName)
+        }
     }
 
     fun stop() {
         // nativeStop 内部会优雅收摊（最多等 8 秒），放到 IO 线程避免阻塞主线程。
         viewModelScope.launch(Dispatchers.IO) {
-            runtime.stop()
+            runtime.stop().onFailure { error ->
+                // 收摊超时 / 内部错：内核可能卡在关闭的某一步，必须让用户看见。
+                _error.value = HomeError.Runtime(error.message ?: error.javaClass.simpleName)
+            }
             // 内核停稳后，把运行中标记的「待卸载」插件真正删掉。
             val context = appContext ?: return@launch
             runCatching { PluginStore.finalizePendingUninstall(context) }
@@ -376,7 +366,10 @@ class HomeViewModel : ViewModel() {
         restartJob = viewModelScope.launch(Dispatchers.IO) {
             val context = appContext ?: return@launch
             if (runtime.isRunning) {
-                runtime.stop()
+                runtime.stop().onFailure { error ->
+                    // 停止失败照样继续重启，但要让用户看到卡在哪里（通常是一次收摊超时）。
+                    _error.value = HomeError.Runtime(error.message ?: error.javaClass.simpleName)
+                }
                 runCatching { PluginStore.finalizePendingUninstall(context) }
                 // nativeStop 上限 8 秒；给它留足收尾时间再起。
                 delay(1_200L)
@@ -393,7 +386,7 @@ class HomeViewModel : ViewModel() {
         /** 未运行时的空转间隔：只为及时发现「开始运行」，无需每秒刷新。 */
         const val IDLE_TICK_MS = 2_000L
 
-        /** 授权状态的轮询间隔；日志是追加写的，读一次尾部很便宜。 */
+        /** 授权 / 连接状态的轮询间隔；两个接口都只是内存快照，代价很低。 */
         const val AUTH_TICK_MS = 1_000L
 
         /** 未运行时的运行时长占位。 */
@@ -404,19 +397,18 @@ class HomeViewModel : ViewModel() {
     }
 }
 
-/** 日志里读到的一次授权状态快照：原始名字 + 识别后的枚举。 */
-private data class AuthSnapshot(
-    val raw: String,
-    val state: TdlibAuthState,
-)
-
 /** 除「内核准备进度」外的首页状态聚合结果，供 [HomeViewModel.uiState] 二次合并。 */
 private data class BaseHomeState(
     val isRunning: Boolean,
     val uptime: String,
     val pluginCount: Int?,
+    /** 内核报的三个插件计数；还没拿到报告时为 null。 */
+    val loadedPluginCount: Int?,
+    val failedPluginCount: Int?,
+    val skippedPluginCount: Int?,
     val authState: TdlibAuthState,
-    val authStateRaw: String,
+    val needsReLogin: Boolean,
+    val connectionState: TdlibConnectionState,
     val tdlibDetail: String,
 )
 

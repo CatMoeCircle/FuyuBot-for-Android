@@ -1,6 +1,7 @@
 package com.CatMoeCircle.fuyutd.ui.screen.plugin
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -42,6 +44,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
@@ -52,6 +56,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.CatMoeCircle.fuyutd.R
+import com.CatMoeCircle.fuyutd.data.kernel.KernelPluginInfo
+import com.CatMoeCircle.fuyutd.data.kernel.KernelPluginState
+import com.CatMoeCircle.fuyutd.data.kernel.KernelSkippedPlugin
 import com.CatMoeCircle.fuyutd.data.plugin.InstalledPlugin
 import com.CatMoeCircle.fuyutd.ui.component.material.ExpressiveScaffold
 import com.CatMoeCircle.fuyutd.ui.component.material.ExpressiveSwitch
@@ -131,7 +138,10 @@ private fun InstalledListMaterial(
     nestedScrollConnection: NestedScrollConnection,
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
-        if (uiState.installed.isEmpty()) {
+        if (uiState.installed.isEmpty() &&
+            uiState.kernelSkipped.isEmpty() &&
+            uiState.kernelOrphans.isEmpty()
+        ) {
             PluginCenterHintMaterial(stringResource(R.string.plugin_empty))
         } else {
             LazyColumn(
@@ -141,11 +151,6 @@ private fun InstalledListMaterial(
                 contentPadding = PaddingValues(top = 8.dp, bottom = bottomInnerPadding + 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (uiState.rebootNeeded) {
-                    item(key = "reboot_banner") {
-                        RebootBannerMaterial(onReboot = actions.onReboot)
-                    }
-                }
                 items(uiState.installed, key = { it.installed.id }) { item ->
                     InstalledCardMaterial(
                         item = item,
@@ -154,39 +159,17 @@ private fun InstalledListMaterial(
                         onUndoUninstall = actions.onUndoUninstall,
                     )
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RebootBannerMaterial(onReboot: () -> Unit) {
-    androidx.compose.material3.Surface(
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.RestartAlt,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = stringResource(R.string.plugin_reboot_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            FilledTonalButton(onClick = onReboot) {
-                Text(stringResource(R.string.plugin_reboot))
+                // 内核报告只在真的有内容时才出区块：内核没跑 / 没拿到报告时列表保持原样。
+                if (uiState.kernelSkipped.isNotEmpty()) {
+                    item(key = "kernel_skipped") {
+                        KernelSkippedCardMaterial(items = uiState.kernelSkipped)
+                    }
+                }
+                if (uiState.kernelOrphans.isNotEmpty()) {
+                    item(key = "kernel_orphans") {
+                        KernelOrphanCardMaterial(items = uiState.kernelOrphans)
+                    }
+                }
             }
         }
     }
@@ -203,6 +186,7 @@ private fun InstalledCardMaterial(
     val name = item.info?.name ?: installed.id
     val version = installed.version.ifBlank { item.info?.latest.orEmpty() }
     val summary = item.info?.summary.orEmpty()
+    val kernel = item.kernel
     val textDecoration = if (installed.pendingUninstall) TextDecoration.LineThrough else null
     var expanded by remember(installed.id) { mutableStateOf(false) }
 
@@ -224,12 +208,19 @@ private fun InstalledCardMaterial(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        text = "${stringResource(R.string.plugin_version)}: $version",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textDecoration = textDecoration,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "${stringResource(R.string.plugin_version)}: $version",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textDecoration = textDecoration,
+                        )
+                        // 内核真实加载结果；内核没跑 / 没匹配上时不显示。
+                        if (kernel != null) {
+                            Spacer(Modifier.width(6.dp))
+                            KernelStateBadgeMaterial(state = kernel.state)
+                        }
+                    }
                 }
                 Spacer(Modifier.width(8.dp))
                 ExpressiveSwitch(
@@ -281,6 +272,27 @@ private fun InstalledCardMaterial(
                 }
             }
 
+            if (kernel != null && kernel.reason.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.plugin_kernel_reason, kernel.reason),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            if (kernel != null && kernel.state == KernelPluginState.PENDING && kernel.missing.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(
+                        R.string.plugin_kernel_missing,
+                        kernel.missing.joinToString("、"),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             HorizontalDivider(thickness = Dp.Hairline, modifier = Modifier.padding(vertical = 8.dp))
 
             Row(
@@ -308,6 +320,145 @@ private fun InstalledCardMaterial(
                             if (installed.pendingUninstall) R.string.plugin_undo else R.string.plugin_uninstall
                         )
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 内核状态徽标：把内核报的 `state` 直接标在插件上。
+ */
+@Composable
+private fun KernelStateBadgeMaterial(state: KernelPluginState) {
+    val background = when (state) {
+        KernelPluginState.ACTIVE -> MaterialTheme.colorScheme.secondaryContainer
+        KernelPluginState.FAILED -> MaterialTheme.colorScheme.errorContainer
+        KernelPluginState.PENDING, KernelPluginState.ACTIVATING, KernelPluginState.UNKNOWN ->
+            MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+    val tint = when (state) {
+        KernelPluginState.ACTIVE -> MaterialTheme.colorScheme.onSecondaryContainer
+        KernelPluginState.FAILED -> MaterialTheme.colorScheme.onErrorContainer
+        KernelPluginState.PENDING, KernelPluginState.ACTIVATING, KernelPluginState.UNKNOWN ->
+            MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Text(
+        text = stringResource(
+            when (state) {
+                KernelPluginState.ACTIVE -> R.string.plugin_kernel_state_active
+                KernelPluginState.PENDING -> R.string.plugin_kernel_state_pending
+                KernelPluginState.ACTIVATING -> R.string.plugin_kernel_state_activating
+                KernelPluginState.FAILED -> R.string.plugin_kernel_state_failed
+                KernelPluginState.UNKNOWN -> R.string.plugin_kernel_state_unknown
+            }
+        ),
+        fontSize = 11.sp,
+        color = tint,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(background)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+    )
+}
+
+/** 「内核跳过的插件」：内核在插件目录里扫到、但连内核都没进去的候选。 */
+@Composable
+private fun KernelSkippedCardMaterial(items: List<KernelSkippedPlugin>) {
+    TonalCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp, 14.dp, 16.dp, 14.dp)) {
+            Text(
+                text = stringResource(R.string.plugin_kernel_skipped_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(R.string.plugin_kernel_skipped_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+            items.forEach { skipped ->
+                Column(modifier = Modifier.padding(top = 10.dp)) {
+                    Text(
+                        text = skipped.path.substringAfterLast('/'),
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (skipped.reason.isNotBlank()) {
+                        Text(
+                            text = stringResource(R.string.plugin_kernel_reason, skipped.reason),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 「内核已加载但不在本机注册表」：匹配不上注册表的条目单独列出，不丢。 */
+@Composable
+private fun KernelOrphanCardMaterial(items: List<KernelPluginInfo>) {
+    TonalCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp, 14.dp, 16.dp, 14.dp)) {
+            Text(
+                text = stringResource(R.string.plugin_kernel_orphans_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(R.string.plugin_kernel_orphans_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+            items.forEach { plugin ->
+                Column(modifier = Modifier.padding(top = 10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = plugin.name.ifBlank { plugin.file },
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        KernelStateBadgeMaterial(state = plugin.state)
+                    }
+                    Text(
+                        text = stringResource(R.string.plugin_kernel_file, plugin.file),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (plugin.reason.isNotBlank()) {
+                        Text(
+                            text = stringResource(R.string.plugin_kernel_reason, plugin.reason),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                    if (plugin.state == KernelPluginState.PENDING && plugin.missing.isNotEmpty()) {
+                        Text(
+                            text = stringResource(
+                                R.string.plugin_kernel_missing,
+                                plugin.missing.joinToString("、"),
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
                 }
             }
         }

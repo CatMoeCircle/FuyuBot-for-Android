@@ -1,13 +1,13 @@
 package com.CatMoeCircle.fuyutd.ui.screen.home
 
 /**
- * TDLib 的授权状态，**直接取自内核日志里的「授权状态：xxx」一行**。
+ * TDLib 的授权状态，取自 `nativeAuthState()`（内核 `fuyubot_auth_state()`）。
  *
  * 不再由运行时生命周期推导：`onState` 报的是内核线程的起停，不代表 TDLib 登没登上。
- * 名字与 TDLib 的 `authorizationState*` 一一对应（见内核 `fuyubot-tdlib/src/authorize.rs`）。
+ * 名字与 TDLib 的 `authorizationState*` 一一对应。
  */
 enum class TdlibAuthState(val rawName: String?) {
-    /** 本次启动还没从日志里读到任何授权状态。 */
+    /** 本次启动还没收到授权状态。 */
     NOT_REPORTED(null),
 
     /** 初始化：TDLib 在准备数据库 / 参数，还没开始问用户。 */
@@ -65,6 +65,33 @@ enum class TdlibAuthState(val rawName: String?) {
 }
 
 /**
+ * TDLib 到 Telegram 的**连接状态**，取自 `nativeConnectionState()`。
+ *
+ * 和授权状态是两回事：断网时授权可能还停在 Ready，但请求发不出去；
+ * `connectionStateUpdating`（连上了、正在同步）**不算** ready。
+ */
+enum class TdlibConnectionState(val rawName: String?) {
+    /** 还没收到 `updateConnectionState`。 */
+    NOT_REPORTED(null),
+    WAITING_FOR_NETWORK("connectionStateWaitingForNetwork"),
+    CONNECTING_TO_PROXY("connectionStateConnectingToProxy"),
+    CONNECTING("connectionStateConnecting"),
+    /** 连上了、正在同步；不算 ready。 */
+    UPDATING("connectionStateUpdating"),
+    READY("connectionStateReady"),
+
+    /** 内核报了，但本 App 不认识（多半是 TDLib 比这里新）。 */
+    UNKNOWN(null),
+    ;
+
+    companion object {
+        /** 按原始构造器名反查；认不出返回 [UNKNOWN]。 */
+        fun fromRaw(name: String): TdlibConnectionState =
+            entries.firstOrNull { it.rawName == name } ?: UNKNOWN
+    }
+}
+
+/**
  * 首页展示的数据。
  *
  * 运行时长、插件数量、授权状态已接入真实数据源，`null` 表示「尚未采集」，
@@ -83,16 +110,23 @@ data class HomeUiState(
     val avatarPath: String? = null,
     /** 形如 `01:23:45`；未运行时为 `00:00:00`。 */
     val uptime: String = "00:00:00",
-    /** 本地已安装的插件数量（`plugins/` 下的 so）；为 null 表示内核未安装。 */
+    /**
+     * 插件数量：内核运行时取它**扫到的候选数**（报告里的 `scanned`），
+     * 未运行 / 还没拿到报告时退回 `plugins/` 下的 `.so` 文件数；null 表示内核未安装。
+     */
     val pluginCount: Int? = null,
-    /** TDLib 当前授权状态，来自内核日志。 */
+    /** TDLib 当前授权状态，来自 `nativeAuthState()`。 */
     val authState: TdlibAuthState = TdlibAuthState.NOT_REPORTED,
-    /** 日志里原样的 `authorizationState*` 名字；未上报时为空串。 */
-    val authStateRaw: String = "",
+    /** 登录成功之后又被要求重新登录 = 被下线 / 封禁；登录窗口里恒为 false。 */
+    val needsReLogin: Boolean = false,
+    /** TDLib 到 Telegram 的链路状态，来自 `nativeConnectionState()`。 */
+    val connectionState: TdlibConnectionState = TdlibConnectionState.NOT_REPORTED,
     /** 内核回调附带的状态描述，可能为空。 */
     val tdlibDetail: String = "",
-    /** 加载成功的插件数；内核尚未开放接口，暂为空（界面显示占位符）。 */
+    /** 内核报的「已加载」插件数；null 表示还没拿到报告（界面显示占位符）。 */
     val loadedPluginCount: Int? = null,
-    /** 加载失败的插件数；内核尚未开放接口，暂为空（界面显示占位符）。 */
+    /** 内核报的「加载失败」插件数：进了内核但 apply 失败。 */
     val failedPluginCount: Int? = null,
+    /** 内核报的「跳过」插件数：连内核都没进去（打开失败 / 位置不对）。 */
+    val skippedPluginCount: Int? = null,
 )

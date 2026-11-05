@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
 /**
  * 日志页状态。
  *
- * 内核把日志追加写到 `<root>/logs/fuyubot.log`，没有回调，所以这里定时轮询文件尾部。
+ * 内核把日志追加写到 `filesDir/logs/fuyubot.log`，没有回调，所以这里定时轮询文件尾部。
  * 页面不可见时（[stopPolling]）停掉轮询，避免后台空转。
  */
 class LogViewModel : ViewModel() {

@@ -1,5 +1,7 @@
 package com.CatMoeCircle.fuyutd.ui.screen.plugin
 
+import com.CatMoeCircle.fuyutd.data.kernel.KernelPluginInfo
+import com.CatMoeCircle.fuyutd.data.kernel.KernelSkippedPlugin
 import com.CatMoeCircle.fuyutd.data.plugin.InstalledPlugin
 import com.CatMoeCircle.fuyutd.data.plugin.PluginInfo
 
@@ -33,6 +35,8 @@ data class RepoPluginItem(
 data class InstalledPluginItem(
     val installed: InstalledPlugin,
     val info: PluginInfo? = null,
+    /** 内核报告里与这个插件匹配到的条目；内核未运行 / 没匹配上为 null。 */
+    val kernel: KernelPluginInfo? = null,
 )
 
 /**
@@ -50,6 +54,16 @@ data class PluginUiState(
     val query: String = "",
     /** 本地已安装插件。 */
     val installed: List<InstalledPluginItem> = emptyList(),
+    /**
+     * 内核跳过、根本没加载的候选（内核在插件目录里扫到但没进去）。
+     * 内核未运行 / 还没拿到报告时为空，此时界面不显示这一区块。
+     */
+    val kernelSkipped: List<KernelSkippedPlugin> = emptyList(),
+    /**
+     * 内核已加载、但本机注册表里匹配不上的插件（例如手工放进插件目录的）。
+     * 内核未运行 / 还没拿到报告 / 全部匹配上时为空。
+     */
+    val kernelOrphans: List<KernelPluginInfo> = emptyList(),
     /** 商城插件（已过滤）。 */
     val repoItems: List<RepoPluginItem> = emptyList(),
     /** 是否只看支持当前设备的插件。 */

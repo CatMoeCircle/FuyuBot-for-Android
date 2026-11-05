@@ -1,12 +1,18 @@
 package com.CatMoeCircle.fuyutd
 
+import android.Manifest
 import android.os.Bundle
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -98,9 +104,14 @@ private const val PAGE_COUNT = 4
 
 class MainActivity : ComponentActivity() {
 
+    /** 通知权限申请结果：拒绝也不影响内核运行，只是通知栏看不到常驻通知。 */
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppPrefs.init(this)
+        requestNotificationPermissionIfNeeded()
         enableEdgeToEdge()
         setContent {
             val settingsViewModel = viewModel<SettingsViewModel>()
@@ -270,6 +281,30 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Android 13+ 的通知权限：内核前台服务的常驻通知需要它。
+     *
+     * 只在**第一次启动**时申请一次（结果记在设置里），被拒后不再反复弹窗——用户仍可在
+     * 系统设置里打开；拒绝本身不影响内核运行，只是通知栏看不到常驻通知。
+     */
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) return
+        val prefs = AppPrefs.prefs()
+        if (prefs.getBoolean(KEY_NOTIFICATION_PERMISSION_ASKED, false)) return
+        prefs.edit { putBoolean(KEY_NOTIFICATION_PERMISSION_ASKED, true) }
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    private companion object {
+        /** 「已经弹过一次通知权限申请」的标记，避免每次启动都打扰用户。 */
+        const val KEY_NOTIFICATION_PERMISSION_ASKED = "notification_permission_asked"
     }
 }
 

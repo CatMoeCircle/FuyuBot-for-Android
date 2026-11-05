@@ -3,6 +3,10 @@ package com.CatMoeCircle.fuyutd.ui.viewmodel
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.CatMoeCircle.fuyutd.data.kernel.FuyuBotRuntime
+import com.CatMoeCircle.fuyutd.data.kernel.KernelManager
+import com.CatMoeCircle.fuyutd.data.kernel.KernelPluginInfo
+import com.CatMoeCircle.fuyutd.data.kernel.KernelPluginReport
 import com.CatMoeCircle.fuyutd.data.plugin.InstalledPlugin
 import com.CatMoeCircle.fuyutd.data.plugin.PluginInfo
 import com.CatMoeCircle.fuyutd.data.plugin.PluginInstaller
@@ -18,6 +22,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -42,11 +48,29 @@ class PluginViewModel(
     private var kernelRunning = false
     private var loaded = false
 
+    /** 内核最近一次的插件报告；null = 内核未运行 / 还没拿到报告。 */
+    private var kernelReport: KernelPluginReport? = null
+
     private var allPlugins: List<PluginInfo> = emptyList()
 
     private val indexUrl = "https://catmoecircle.github.io/FuyuBot-plugins/index.json"
 
     private val activeJobs = mutableMapOf<String, Job>()
+
+    init {
+        // 内核报告随运行时状态发布（`onPlugins` 推送 + 就绪后主动拉一次），
+        // 这里只跟着最新报告重建列表；内核没跑时它是 null，界面保持原样。
+        viewModelScope.launch {
+            FuyuBotRuntime.instance().state
+                .map { it.pluginReport }
+                .distinctUntilChanged()
+                .collect { report ->
+                    if (kernelReport == report) return@collect
+                    kernelReport = report
+                    if (loaded) rebuildItems()
+                }
+        }
+    }
 
     /** 进入页面 / 回到前台时调用。 */
     fun bind(context: Context, kernelRunning: Boolean) {
@@ -266,12 +290,22 @@ class PluginViewModel(
 
         // 本地已安装插件：注册表里的商城插件 + 磁盘上的系统 / 内置插件，
         // 用索引回填名称/简介（系统插件索引里没有，界面回退显示 id）。
+        // 同时把内核报告里的条目按文件名 / 路径前缀匹配上来，供界面叠加真实状态。
+        val kernelPlugins = kernelReport?.plugins.orEmpty()
+        val pluginDirPath = KernelManager.pluginDir(context).absolutePath
+        val matchedKernel = mutableSetOf<KernelPluginInfo>()
         val installedItems = PluginStore.installedIncludingSystem(context).map { registered ->
+            val kernelInfo = kernelPlugins
+                .firstOrNull { it !in matchedKernel && it.matches(pluginDirPath, registered) }
+                ?.also { matchedKernel += it }
             InstalledPluginItem(
                 installed = registered,
                 info = pluginById[registered.id],
+                kernel = kernelInfo,
             )
         }
+        // 内核里有、注册表里对应不上的条目：单独列出，不要因为匹配不上就丢掉。
+        val kernelOrphans = kernelPlugins.filterNot { it in matchedKernel }
 
         val rebootNeeded = installedItems.any { it.installed.pendingRestart || it.installed.pendingUninstall }
 
@@ -281,10 +315,28 @@ class PluginViewModel(
                 loadStatus = PluginLoadStatus.Success,
                 loadError = null,
                 installed = installedItems,
+                kernelSkipped = kernelReport?.skippedPlugins.orEmpty(),
+                kernelOrphans = kernelOrphans,
                 repoItems = repoItems,
                 rebootNeeded = rebootNeeded,
             )
         }
+    }
+
+    /**
+     * 内核报告里的这一项是不是这个已安装插件。
+     *
+     * - 目录包：内核报的 `path` 是 `<pluginDir>/<注册表 fileName>/bin/lib….so`，按路径前缀认；
+     * - 旧形态：`path` 就是 `<pluginDir>/<fileName>`，按路径相等或文件名相等认。
+     */
+    private fun KernelPluginInfo.matches(
+        pluginDirPath: String,
+        installed: InstalledPlugin,
+    ): Boolean {
+        val fileName = installed.fileName
+        if (fileName.isBlank()) return false
+        val base = "$pluginDirPath/$fileName"
+        return path == base || path.startsWith("$base/") || file == fileName
     }
 
     private fun setItemProgress(id: String, progress: Int, error: String?) {

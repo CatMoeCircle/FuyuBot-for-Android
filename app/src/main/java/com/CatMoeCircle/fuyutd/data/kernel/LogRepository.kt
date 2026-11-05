@@ -56,14 +56,14 @@ data class LogEntry(
 }
 
 /**
- * 读取内核写在 `<root>/logs/fuyubot.log` 的运行日志。
+ * 读取内核写在 `filesDir/logs/fuyubot.log` 的运行日志。
  *
+ * 日志目录固定在内核安装目录之外（见 [KernelManager.paths]），内核升级不会清掉它。
  * 内核用 tracing-subscriber 追加写该文件，应用进程无法收到回调，
  * 因此这里按「读文件尾部」的方式取最新内容。
  */
 object LogRepository {
 
-    private const val LOG_DIR = "logs"
     private const val LOG_FILE = "fuyubot.log"
 
     /** 只读文件尾部这么多字节，避免日志变长后一次读爆内存。 */
@@ -72,11 +72,7 @@ object LogRepository {
     /** 最多保留的行数（展示用，再早的丢掉）。 */
     private const val MAX_ENTRIES = 2000
 
-    /** 探测授权状态时只读这么点尾巴：状态行很近，没必要每秒扫 256KB。 */
-    private const val AUTH_SCAN_BYTES = 64 * 1024
-
-    fun logFile(context: Context): File =
-        File(KernelManager.kernelDir(context), "$LOG_DIR/$LOG_FILE")
+    fun logFile(context: Context): File = File(KernelManager.logDir(context), LOG_FILE)
 
     /** 读取并解析日志；文件不存在时返回空列表。 */
     fun read(context: Context): List<LogEntry> {
@@ -84,26 +80,6 @@ object LogRepository {
         if (!file.isFile) return emptyList()
         val text = readTail(file) ?: return emptyList()
         return parse(text).takeLast(MAX_ENTRIES)
-    }
-
-    /** 日志文件当前长度；不存在时返回 0，用于记住「本次启动从哪开始看」。 */
-    fun length(context: Context): Long = logFile(context).takeIf { it.isFile }?.length() ?: 0L
-
-    /**
-     * 日志里最后一条授权状态的原始名字（如 `authorizationStateReady`）。
-     *
-     * 内核把 TDLib 的 `updateAuthorizationState` 打成一行 `授权状态：xxx`，
-     * 这是**唯一**能拿到真实授权状态的渠道——JNI 只回调内核线程的起停。
-     * [sinceOffset] 之前的内容不看，避免读到上一次运行留下的旧状态。
-     */
-    fun latestAuthState(context: Context, sinceOffset: Long): String? {
-        val file = logFile(context)
-        if (!file.isFile) return null
-        val text = readTail(file, sinceOffset) ?: return null
-        // 末尾那一段可能正在被写入（还没换行），状态名或许不完整，整段跳过。
-        // 起点被截断的首行缺「授权状态：」前缀，本来就匹配不上，无需额外处理。
-        val complete = if (text.endsWith('\n')) text else text.substringBeforeLast('\n', "")
-        return AUTH_STATE_PATTERN.findAll(complete).lastOrNull()?.groupValues?.get(1)
     }
 
     /** 清空日志文件；失败返回 false。 */
@@ -128,26 +104,6 @@ object LogRepository {
                     // 从中间开始读时第一行大概率是半截，丢掉。
                     if (start > 0) text.substringAfter('\n', "") else text
                 }
-        }
-    }.getOrNull()
-
-    /**
-     * 读 [sinceOffset] 之后的尾部内容；用于只关心「本次启动新写了什么」的场景。
-     *
-     * [sinceOffset] 大于当前文件长度说明日志被清空 / 轮转过，按「从头读」处理，
-     * 否则会一直停在文件末尾读不到新内容。
-     */
-    private fun readTail(file: File, sinceOffset: Long): String? = runCatching {
-        RandomAccessFile(file, "r").use { raf ->
-            val length = raf.length()
-            val floor = (length - AUTH_SCAN_BYTES).coerceAtLeast(0L)
-            val start = if (sinceOffset in 0..length) maxOf(sinceOffset, floor) else floor
-            val bytes = ByteArray((length - start).toInt())
-            raf.seek(start)
-            raf.readFully(bytes)
-            // 起点落在行中间时首行是半截，但「授权状态：」前缀在前半段被截掉后
-            // 就匹配不上了，所以这里不需要再丢一行。
-            String(bytes, Charsets.UTF_8).replace("\u0000", "")
         }
     }.getOrNull()
 
@@ -200,11 +156,4 @@ object LogRepository {
 
     /** 形如 `fuyubot_android::run: 正文` 里的模块名部分。 */
     private val MODULE_PATTERN = Regex("""^([A-Za-z_][\w:]*):\s""")
-
-    /**
-     * 内核打的那行 `授权状态：authorizationStateWaitCode`。
-     *
-     * 只认 `authorizationState` 开头的整词，避免把正文里随便提到的名字当成状态。
-     */
-    private val AUTH_STATE_PATTERN = Regex("""授权状态：(authorizationState\w+)""")
 }

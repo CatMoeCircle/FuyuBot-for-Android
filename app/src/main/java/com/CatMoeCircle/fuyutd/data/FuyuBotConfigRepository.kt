@@ -1,6 +1,8 @@
 package com.CatMoeCircle.fuyutd.data
 
 import androidx.core.content.edit
+import com.CatMoeCircle.fuyutd.data.kernel.KernelManager
+import java.io.File
 
 /**
  * Fuyu-Bot 的账户与运行配置，全部落在 [AppPrefs] 的 SharedPreferences 里。
@@ -28,12 +30,22 @@ class FuyuBotConfigRepository {
     val isAuthorized: Boolean
         get() = apiId > 0 && apiHash.isNotBlank()
 
-    /** 组装 options JSON 交给 `nativeStart`；缺少必要字段返回 null。 */
-    fun buildOptionsJson(root: String): String? {
+    /**
+     * 组装 options JSON 交给 `nativeStart`；缺少必要字段返回 null。
+     *
+     * [paths] 用 [KernelManager.paths] 的返回值：`root` 是 `filesDir`，
+     * `plugin_dir` / `data_dir` 按相对 root 的目录名传（内核自己拼），
+     * `lib_dir` 传内核 `.so` 所在目录的绝对路径。这样内核升级清空安装目录时
+     * 不会连带清掉登录态、日志和用户插件。
+     */
+    fun buildOptionsJson(paths: KernelManager.KernelPaths): String? {
         if (!isAuthorized) return null
         return buildString {
             append("{")
-            append("\"root\":").append(quote(root)).append(",")
+            append("\"root\":").append(quote(paths.root)).append(",")
+            append("\"plugin_dir\":").append(quote(relativeTo(paths.root, paths.pluginDir))).append(",")
+            append("\"data_dir\":").append(quote(relativeTo(paths.root, paths.dataDir))).append(",")
+            append("\"lib_dir\":").append(quote(paths.libDir)).append(",")
             append("\"api_id\":").append(apiId).append(",")
             append("\"api_hash\":").append(quote(apiHash))
             if (botToken.isNotBlank()) {
@@ -42,6 +54,13 @@ class FuyuBotConfigRepository {
             }
             append("}")
         }
+    }
+
+    /** 在 `root` 之下的路径给相对值（内核按 root 解析），否则退回绝对路径。 */
+    private fun relativeTo(root: String, path: String): String {
+        val prefix = File(root).absoluteFile.path + File.separator
+        val target = File(path).absoluteFile.path
+        return if (target.startsWith(prefix)) target.removePrefix(prefix) else target
     }
 
     private fun quote(value: String): String =

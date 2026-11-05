@@ -210,8 +210,9 @@ fun HomeMiuix(
                     Spacer(Modifier.height(14.dp))
                     TdlibStatusRow(
                         status = state.authState,
-                        raw = state.authStateRaw,
                         detail = state.tdlibDetail,
+                        connection = state.connectionState,
+                        needsReLogin = state.needsReLogin,
                     )
                 }
             }
@@ -245,6 +246,14 @@ fun HomeMiuix(
                             emphasized = (state.failedPluginCount ?: 0) > 0,
                             modifier = Modifier.weight(1f),
                         )
+                        MetricBox(
+                            label = stringResource(R.string.home_plugins_skipped),
+                            value = state.skippedPluginCount?.toString()
+                                ?: stringResource(R.string.home_value_unknown),
+                            unit = stringResource(R.string.home_unit_count),
+                            emphasized = (state.skippedPluginCount ?: 0) > 0,
+                            modifier = Modifier.weight(1f),
+                        )
                     }
                 }
             }
@@ -255,13 +264,21 @@ fun HomeMiuix(
 }
 
 @Composable
-private fun TdlibStatusRow(status: TdlibAuthState, raw: String, detail: String) {
+private fun TdlibStatusRow(
+    status: TdlibAuthState,
+    detail: String,
+    connection: TdlibConnectionState,
+    needsReLogin: Boolean,
+) {
     val colorScheme = MiuixTheme.colorScheme
     val tint = when {
         status == TdlibAuthState.READY -> colorScheme.primary
         status.isUnsupported -> colorScheme.error
         else -> colorScheme.onSurfaceVariantSummary
     }
+    // 卡片只保留三条信息：主显示内核推的状态描述，下面是授权状态，最后是链路状态。
+    // 任一项缺失都统一退回「尚未启动」，不留空行。
+    val headline = detail.ifBlank { stringResource(R.string.home_tdlib_not_reported) }
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -272,28 +289,40 @@ private fun TdlibStatusRow(status: TdlibAuthState, raw: String, detail: String) 
             )
             Spacer(Modifier.size(10.dp))
             Text(
-                text = status.label(),
+                text = headline,
                 fontSize = 22.sp,
                 lineHeight = 26.sp,
                 fontWeight = FontWeight.Bold,
                 color = tint,
             )
         }
-        // 日志里的原始名字，方便和 fuyubot.log 里的「授权状态：」那行对上。
-        if (raw.isNotBlank()) {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = raw,
-                fontSize = 13.sp,
-                color = colorScheme.onSurfaceVariantSummary,
-            )
-        }
-        if (detail.isNotBlank()) {
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = status.label(),
+            fontSize = 13.sp,
+            color = if (status.isUnsupported) {
+                colorScheme.error
+            } else {
+                colorScheme.onSurfaceVariantSummary
+            },
+        )
+        // 链路状态单独一行：断网时授权可能还停在 Ready，但请求发不出去。
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.home_connection) + "：" + connection.label(),
+            fontSize = 13.sp,
+            color = if (connection == TdlibConnectionState.READY) {
+                colorScheme.primary
+            } else {
+                colorScheme.onSurfaceVariantSummary
+            },
+        )
+        if (needsReLogin) {
             Spacer(Modifier.height(8.dp))
             Text(
-                text = detail,
+                text = stringResource(R.string.home_tdlib_needs_relogin),
                 fontSize = 13.sp,
-                color = colorScheme.onSurfaceVariantSummary,
+                color = colorScheme.error,
             )
         }
         status.hint()?.let { hint ->
@@ -348,6 +377,19 @@ private fun TdlibAuthState.label(): String = stringResource(
         TdlibAuthState.CLOSING -> R.string.home_tdlib_closing
         TdlibAuthState.CLOSED -> R.string.home_tdlib_closed
         TdlibAuthState.UNKNOWN -> R.string.home_tdlib_unknown
+    }
+)
+
+@Composable
+private fun TdlibConnectionState.label(): String = stringResource(
+    when (this) {
+        TdlibConnectionState.NOT_REPORTED -> R.string.home_connection_not_reported
+        TdlibConnectionState.WAITING_FOR_NETWORK -> R.string.home_connection_waiting_network
+        TdlibConnectionState.CONNECTING_TO_PROXY -> R.string.home_connection_connecting_proxy
+        TdlibConnectionState.CONNECTING -> R.string.home_connection_connecting
+        TdlibConnectionState.UPDATING -> R.string.home_connection_updating
+        TdlibConnectionState.READY -> R.string.home_connection_ready
+        TdlibConnectionState.UNKNOWN -> R.string.home_connection_unknown
     }
 )
 

@@ -1,0 +1,14 @@
+<resources>
+    <!-- 内核前台保活服务（KernelService）的用户可见文本。 -->
+    <string name="kernel_service_channel_name">内核运行状态</string>
+    <string name="kernel_service_channel_description">内核运行时显示的常驻通知</string>
+    <string name="kernel_service_title">fuyuTD 内核</string>
+    <string name="kernel_service_status_starting">正在启动…</string>
+    <string name="kernel_service_status_running">运行中</string>
+    <string name="kernel_service_status_stopping">正在停止…</string>
+    <string name="kernel_service_status_stopped">已停止</string>
+    <string name="kernel_service_action_stop">停止</string>
+
+    <!-- 特殊用途前台服务的用途说明（Play 商店审核用，非界面文本）。 -->
+    <string name="kernel_service_fgs_subtype">保持 Fuyu-Bot 内核在后台持续运行，直到用户在应用内停止</string>
+</resources>
