@@ -5,6 +5,10 @@ import androidx.core.content.edit
 import com.CatMoeCircle.fuyutd.data.AppPrefs
 import com.CatMoeCircle.fuyutd.data.kernel.KernelManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
@@ -27,7 +31,8 @@ enum class PluginLayout {
  * - 目录包：`plugins/<id>/` 启用、`plugins/.disabled/<id>/` 停用。
  *
  * [pendingRestart] 表示「插件文件已变更但内核尚未重启加载」；
- * [pendingUninstall] 表示「内核运行中发起了卸载，待内核停止后才真正删除」。
+ * [pendingUninstall] 表示「内核运行中发起了卸载：插件已挪到停用位置、重启后不再加载，
+ * 待内核停止后才真正删除」。
  */
 data class InstalledPlugin(
     val id: String,
@@ -37,8 +42,19 @@ data class InstalledPlugin(
     val layout: PluginLayout = PluginLayout.LEGACY,
     val pendingRestart: Boolean = false,
     val pendingUninstall: Boolean = false,
+    /**
+     * 发起「待卸载」前是否处于启用状态。
+     *
+     * 只有 [pendingUninstall] 为 true 时有意义：待卸载会把插件先挪到停用位置
+     * （让内核下次重启不再加载它），撤销时按这个值决定是否挪回启用位置。
+     */
+    val enabledBeforeUninstall: Boolean = true,
     /** 当前是否启用（由磁盘上的位置推导，不落盘）。 */
     val enabled: Boolean = true,
+    /** 目录包 `plugin.json` 里的展示名；旧形态 / 读不到时为空串（不落盘）。 */
+    val name: String = "",
+    /** 目录包 `plugin.json` 里的简介；旧形态 / 读不到时为空串（不落盘）。 */
+    val summary: String = "",
 )
 
 /**
@@ -54,6 +70,16 @@ data class InstalledPlugin(
 object PluginStore {
 
     private const val KEY_INSTALLED = "installed_plugins"
+
+    private val _revision = MutableStateFlow(0L)
+
+    /**
+     * 注册表的写入次数。
+     *
+     * 插件页据此在「别处改了注册表」时重新读取列表：例如内核重启 / 停止后
+     * [clearAllPendingRestart] 清掉了「待重启」标记，界面不能还留着旧提示。
+     */
+    val revision: StateFlow<Long> = _revision.asStateFlow()
 
     /** 旧形态停用后缀，加在 `.so` 之后：`<id>.so` → `<id>.so.disable`。 */
     const val DISABLE_SUFFIX = ".disable"
@@ -107,6 +133,7 @@ object PluginStore {
                             layout = layout,
                             pendingRestart = item.optBoolean("pendingRestart"),
                             pendingUninstall = item.optBoolean("pendingUninstall"),
+                            enabledBeforeUninstall = item.optBoolean("enabledBeforeUninstall", true),
                             enabled = isEnabledOnDisk(dir, layout, fileName),
                         )
                     )
@@ -125,17 +152,27 @@ object PluginStore {
      * 系统插件随内核资产一起安装到 `plugins/` 下，没有商城 id，也不会进注册表
      * （见 [reconcile] 的「保留原状」分支）。两种形态都认：
      * - 旧形态：`plugins/<id>.so` 与 `<id>.so.disable`，id 取文件名；
-     * - 目录包：`plugins/<id>/` 与 `plugins/.disabled/<id>/`，id / 版本取自 `plugin.json`。
+     * - 目录包：`plugins/<id>/` 与 `plugins/.disabled/<id>/`，id / 版本 / 名称 / 简介
+     *   取自 `plugin.json`（与 `bin/` 同级），因此断网时也能显示完整信息。
      *
-     * 界面在索引里匹配不到时回退显示 id。
+     * 界面在索引里匹配不到时回退到这里的 `name` / `id`。
      */
     fun installedIncludingSystem(context: Context): List<InstalledPlugin> {
-        val registered = installed(context)
+        val pluginDir = KernelManager.pluginDir(context)
+        // 注册表里的商城插件也回填 plugin.json 的展示信息，否则断网时只能显示 id。
+        val registered = installed(context).map { plugin ->
+            if (plugin.layout != PluginLayout.BUNDLE) return@map plugin
+            val info = readBundleInfo(findBundleDir(pluginDir, plugin.fileName))
+            plugin.copy(
+                name = info.name,
+                summary = info.summary,
+                version = plugin.version.ifBlank { info.version },
+            )
+        }
         val registeredNames = registered.map { it.fileName }.toSet()
-        val dir = KernelManager.pluginDir(context)
 
         val onDisk = buildList {
-            dir.listFiles()?.forEach { child ->
+            pluginDir.listFiles()?.forEach { child ->
                 if (child.isFile) {
                     val disabled = child.name.endsWith(DISABLE_SUFFIX, ignoreCase = true)
                     val soName = if (disabled) {
@@ -159,27 +196,33 @@ object PluginStore {
                     isBundleDir(child)
                 ) {
                     if (child.name in registeredNames) return@forEach
+                    val info = readBundleInfo(child)
                     add(
                         InstalledPlugin(
                             id = child.name,
-                            version = readBundleVersion(child),
+                            version = info.version,
                             fileName = child.name,
                             layout = PluginLayout.BUNDLE,
+                            name = info.name,
+                            summary = info.summary,
                         )
                     )
                 }
             }
             // 停用的目录包：整包在 plugins/.disabled/ 下。
-            File(dir, DISABLED_DIR).listFiles()?.forEach { child ->
+            File(pluginDir, DISABLED_DIR).listFiles()?.forEach { child ->
                 if (!child.isDirectory || !isBundleDir(child)) return@forEach
                 if (child.name in registeredNames) return@forEach
+                val info = readBundleInfo(child)
                 add(
                     InstalledPlugin(
                         id = child.name,
-                        version = readBundleVersion(child),
+                        version = info.version,
                         fileName = child.name,
                         layout = PluginLayout.BUNDLE,
                         enabled = false,
+                        name = info.name,
+                        summary = info.summary,
                     )
                 )
             }
@@ -187,10 +230,30 @@ object PluginStore {
         return registered + onDisk.sortedBy { it.fileName }
     }
 
-    /** 读目录包 `plugin.json` 里的版本；读不到就是空串。 */
-    private fun readBundleVersion(dir: File): String = runCatching {
-        org.json.JSONObject(File(dir, MANIFEST_FILE).readText()).optString("version")
-    }.getOrDefault("")
+    /** 目录包的实际位置：启用位置优先，其次停用位置（两者都没有时返回启用位置）。 */
+    private fun findBundleDir(root: File, fileName: String): File {
+        val enabled = File(root, fileName)
+        if (enabled.isDirectory) return enabled
+        val disabled = File(File(root, DISABLED_DIR), fileName)
+        return if (disabled.isDirectory) disabled else enabled
+    }
+
+    /** 目录包 `plugin.json` 里界面展示需要的元数据；解析宽容，读不到就是空值。 */
+    private data class BundleInfo(
+        val version: String = "",
+        val name: String = "",
+        val summary: String = "",
+    )
+
+    private fun readBundleInfo(dir: File): BundleInfo = runCatching {
+        val json = JSONObject(File(dir, MANIFEST_FILE).readText())
+        BundleInfo(
+            version = json.optString("version"),
+            name = json.optString("name"),
+            // 插件清单用 `description` 放介绍；索引里的同义字段叫 summary。
+            summary = json.optString("description"),
+        )
+    }.getOrDefault(BundleInfo())
 
     /** 写入 / 覆盖一条注册信息。 */
     fun put(context: Context, plugin: InstalledPlugin) {
@@ -208,9 +271,20 @@ object PluginStore {
         mutate(context, id) { it.copy(pendingRestart = true) }
     }
 
-    /** 把某个插件标记为「待卸载」（内核停止后删除文件并移除注册）。 */
-    fun markPendingUninstall(context: Context, id: String) {
-        mutate(context, id) { it.copy(pendingUninstall = true, pendingRestart = true) }
+    /**
+     * 把某个插件标记为「待卸载」（内核停止后删除文件并移除注册）。
+     *
+     * [wasEnabled] 记下发起卸载前是否启用：卸载时插件会被挪到停用位置，
+     * 撤销时按这个值决定是否挪回启用位置。
+     */
+    fun markPendingUninstall(context: Context, id: String, wasEnabled: Boolean) {
+        mutate(context, id) {
+            it.copy(
+                pendingUninstall = true,
+                pendingRestart = true,
+                enabledBeforeUninstall = wasEnabled,
+            )
+        }
     }
 
     /** 撤销「待卸载」标记。 */
@@ -218,7 +292,7 @@ object PluginStore {
         mutate(context, id) { it.copy(pendingUninstall = false, pendingRestart = false) }
     }
 
-    /** 内核启动后调用：把所有「待重启」标记清掉（文件已按当前状态加载完毕）。 */
+    /** 内核启动 / 停止后调用：把所有「待重启」标记清掉（磁盘现状会在下次启动时整体加载）。 */
     fun clearAllPendingRestart(context: Context) {
         persist(context, installed(context).map { it.copy(pendingRestart = false) })
     }
@@ -254,10 +328,12 @@ object PluginStore {
                 )
                 item.put("pendingRestart", plugin.pendingRestart)
                 item.put("pendingUninstall", plugin.pendingUninstall)
+                item.put("enabledBeforeUninstall", plugin.enabledBeforeUninstall)
                 array.put(item)
             }
             root.put("plugins", array)
             AppPrefs.prefs().edit { putString(KEY_INSTALLED, root.toString()) }
+            _revision.update { it + 1 }
         }
     }
 
@@ -426,32 +502,52 @@ object PluginInstaller {
 
     /**
      * 卸载插件：
-     * - 内核未运行 → 直接删除 `.so` / `.so.disable` 并移除注册条目；
-     * - 内核运行中 → 只标记「待卸载」，文件删除与注册移除推迟到内核停止后。
+     * - 内核未运行 → 直接删除插件文件并移除注册条目；
+     * - 内核运行中 → 标记「待卸载」，并立刻把插件挪到停用位置：内核下次重启按磁盘扫描时
+     *   就不会再加载它；文件删除与注册移除推迟到内核停止后。
      */
     fun uninstall(context: Context, installed: InstalledPlugin, kernelRunning: Boolean): Result<Unit> =
         runCatching {
             if (kernelRunning) {
-                PluginStore.markPendingUninstall(context, installed.id)
+                // 只有注册表里的插件能记「待卸载」；磁盘上的系统插件没有注册条目，
+                // 保持原有行为（不在这里动它）。
+                val registered = PluginStore.find(context, installed.id) != null
+                PluginStore.markPendingUninstall(context, installed.id, installed.enabled)
+                if (registered && installed.enabled) {
+                    // 挪到停用位置，重启内核时就不会再被挂载 / 加载。
+                    movePluginDir(context, installed, enabled = false)
+                }
             } else {
                 PluginStore.deletePluginFiles(context, installed)
                 PluginStore.remove(context, installed.id)
             }
         }
 
-    /** 撤销「待卸载」标记（内核运行中误删后反悔）。 */
-    fun undoUninstall(context: Context, installed: InstalledPlugin): Result<Unit> =
-        runCatching { PluginStore.clearPendingUninstall(context, installed.id) }
+    /**
+     * 撤销「待卸载」：恢复到发起卸载前的启用状态。
+     *
+     * 文件挪回启用位置；内核运行中再标一次「待重启」，下次重启才会重新加载。
+     */
+    fun undoUninstall(
+        context: Context,
+        installed: InstalledPlugin,
+        kernelRunning: Boolean,
+    ): Result<Unit> = runCatching {
+        val restoreEnabled = installed.enabledBeforeUninstall
+        PluginStore.clearPendingUninstall(context, installed.id)
+        if (restoreEnabled) {
+            movePluginDir(context, installed, enabled = true)
+            if (kernelRunning) PluginStore.markPendingRestart(context, installed.id)
+        }
+    }
 
     /**
-     * 启用 / 停用插件。
+     * 启用 / 停用插件（只挪文件，不碰注册表）。
      *
      * - 旧形态：在 `<id>.so` 与 `<id>.so.disable` 之间改名——内核只认 `.so` 后缀，
      *   改完它就扫不到这个插件了；
      * - 目录包：整包在 `plugins/<id>/` 与 `plugins/.disabled/<id>/` 之间挪动——内核只扫
      *   `plugins/` 这一层，挪走即等于停用，而且不会报「跳过」。
-     *
-     * 内核运行中变更会标记「待重启」，因为磁盘变化不影响已经加载进内存的实例。
      */
     fun setEnabled(
         context: Context,
@@ -459,6 +555,15 @@ object PluginInstaller {
         enabled: Boolean,
         kernelRunning: Boolean,
     ): Result<Unit> = runCatching {
+        movePluginDir(context, installed, enabled)
+        // 内核运行中变更会标记「待重启」，因为磁盘变化不影响已经加载进内存的实例。
+        if (kernelRunning) {
+            PluginStore.markPendingRestart(context, installed.id)
+        }
+    }
+
+    /** 把插件在启用 / 停用两个位置之间挪动；按磁盘现状判断，重复调用是安全的。 */
+    private fun movePluginDir(context: Context, installed: InstalledPlugin, enabled: Boolean) {
         val dir = KernelManager.pluginDir(context)
         when (installed.layout) {
             PluginLayout.LEGACY -> {
@@ -485,9 +590,6 @@ object PluginInstaller {
                     else -> Unit
                 }
             }
-        }
-        if (kernelRunning) {
-            PluginStore.markPendingRestart(context, installed.id)
         }
     }
 

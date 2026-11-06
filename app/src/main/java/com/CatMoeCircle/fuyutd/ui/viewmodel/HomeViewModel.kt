@@ -306,8 +306,17 @@ class HomeViewModel : ViewModel() {
         withContext(Dispatchers.IO) { LogRepository.clear(context) }
         // 新的运行时会有新的提问 id，旧的那条不该再压制自动应答。
         autoAnsweredLoginMethodId = null
+        // 启动前内核已经在跑时 nativeStart 会返回 BUSY，不会重新按磁盘加载插件：
+        // 那种情况下「待重启」仍然成立，不能清标记。
+        val wasRunning = runtime.isRunning
         runtime.start(context).fold(
-            onSuccess = { /* onState 回调会驱动 UI，这里无需额外处理 */ },
+            onSuccess = {
+                // 内核按磁盘现状重新加载插件后，之前的「待重启」标记随之失效。
+                // 不管这次启动是首页「启动」还是插件页「重启」发起的，都走这里清掉。
+                if (!wasRunning) {
+                    runCatching { PluginStore.clearAllPendingRestart(context) }
+                }
+            },
             onFailure = { error ->
                 _error.value = HomeError.Runtime(
                     error.message ?: error.javaClass.simpleName
@@ -345,21 +354,29 @@ class HomeViewModel : ViewModel() {
     fun stop() {
         // nativeStop 内部会优雅收摊（最多等 8 秒），放到 IO 线程避免阻塞主线程。
         viewModelScope.launch(Dispatchers.IO) {
-            runtime.stop().onFailure { error ->
+            val stopped = runtime.stop()
+            stopped.onFailure { error ->
                 // 收摊超时 / 内部错：内核可能卡在关闭的某一步，必须让用户看见。
                 _error.value = HomeError.Runtime(error.message ?: error.javaClass.simpleName)
             }
             // 内核停稳后，把运行中标记的「待卸载」插件真正删掉。
             val context = appContext ?: return@launch
             runCatching { PluginStore.finalizePendingUninstall(context) }
+            if (stopped.isSuccess) {
+                // 内核已经停了，磁盘现状会在下次启动时整体加载，不存在「待重启」这回事。
+                runCatching { PluginStore.clearAllPendingRestart(context) }
+            }
         }
     }
 
     /**
-     * 重启内核：先停（收摊 + 落实待卸载），再重新启动。
+     * 重启内核：先停（收摊），再重新启动。
      *
      * 供插件页在「增删 / 启停插件后需要重启生效」时调用。停与启之间留一点间隔，
      * 等 nativeStop 的优雅收摊真正走完，避免 start 撞上还在收尾的旧会话。
+     *
+     * 重启**不删除**「待卸载」的插件，但它发起卸载时已经被挪到停用位置，
+     * 所以重启后内核不会再加载它；文件要等内核真正停止（首页「停止」）时才删除。
      */
     fun restartKernel() {
         if (restartJob?.isActive == true) return
@@ -370,14 +387,12 @@ class HomeViewModel : ViewModel() {
                     // 停止失败照样继续重启，但要让用户看到卡在哪里（通常是一次收摊超时）。
                     _error.value = HomeError.Runtime(error.message ?: error.javaClass.simpleName)
                 }
-                runCatching { PluginStore.finalizePendingUninstall(context) }
                 // nativeStop 上限 8 秒；给它留足收尾时间再起。
                 delay(1_200L)
             }
             if (config.isAuthorized) {
+                // doStart 成功后自行清掉「待重启」标记（与首页直接启动同一套逻辑）。
                 doStart(context)
-                // 重启后内核按磁盘现状重新加载插件，之前的「待重启」标记随之失效。
-                runCatching { PluginStore.clearAllPendingRestart(context) }
             }
         }
     }

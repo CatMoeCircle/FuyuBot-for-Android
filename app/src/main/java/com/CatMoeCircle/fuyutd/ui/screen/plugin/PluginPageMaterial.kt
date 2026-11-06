@@ -156,6 +156,8 @@ private fun InstalledListMaterial(
                         item = item,
                         onToggleEnabled = actions.onToggleEnabled,
                         onUninstall = actions.onUninstall,
+                        onRequestConfirmUninstall = actions.onRequestConfirmUninstall,
+                        onRestoreUninstall = actions.onRestoreUninstall,
                         onUndoUninstall = actions.onUndoUninstall,
                     )
                 }
@@ -180,14 +182,25 @@ private fun InstalledCardMaterial(
     item: InstalledPluginItem,
     onToggleEnabled: (InstalledPlugin, Boolean) -> Unit,
     onUninstall: (InstalledPlugin) -> Unit,
+    onRequestConfirmUninstall: () -> Unit,
+    onRestoreUninstall: () -> Unit,
     onUndoUninstall: (InstalledPlugin) -> Unit,
 ) {
     val installed = item.installed
-    val name = item.info?.name ?: installed.id
+    // 名称 / 简介优先用商城索引；断网或本地导入的插件回退到 plugin.json 里的信息。
+    val name = item.info?.name.orEmpty().ifBlank { installed.name }.ifBlank { installed.id }
     val version = installed.version.ifBlank { item.info?.latest.orEmpty() }
-    val summary = item.info?.summary.orEmpty()
+    val summary = item.info?.summary.orEmpty().ifBlank { installed.summary }
     val kernel = item.kernel
-    val textDecoration = if (installed.pendingUninstall) TextDecoration.LineThrough else null
+    val pendingConfirm = item.confirmUninstall
+    val struck = installed.pendingUninstall || pendingConfirm
+    val textDecoration = if (struck) TextDecoration.LineThrough else null
+    // 运行中已标记待卸载 → 撤销；停止时已划掉 → 确认卸载；否则先划掉。
+    val deleteAction: () -> Unit = when {
+        installed.pendingUninstall -> ({ onUndoUninstall(installed) })
+        pendingConfirm -> onRequestConfirmUninstall
+        else -> ({ onUninstall(installed) })
+    }
     var expanded by remember(installed.id) { mutableStateOf(false) }
 
     TonalCard(
@@ -224,7 +237,7 @@ private fun InstalledCardMaterial(
                 }
                 Spacer(Modifier.width(8.dp))
                 ExpressiveSwitch(
-                    enabled = !installed.pendingUninstall,
+                    enabled = !struck,
                     checked = installed.enabled && !installed.pendingUninstall,
                     onCheckedChange = { checked ->
                         if (checked != installed.enabled) onToggleEnabled(installed, checked)
@@ -299,11 +312,20 @@ private fun InstalledCardMaterial(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
+                if (pendingConfirm) {
+                    FilledTonalButton(onClick = onRestoreUninstall) {
+                        Icon(
+                            imageVector = Icons.Rounded.Sync,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.plugin_restore))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
                 FilledTonalButton(
-                    onClick = {
-                        if (installed.pendingUninstall) onUndoUninstall(installed)
-                        else onUninstall(installed)
-                    },
+                    onClick = deleteAction,
                 ) {
                     Icon(
                         imageVector = if (installed.pendingUninstall) {
@@ -317,7 +339,11 @@ private fun InstalledCardMaterial(
                     Spacer(Modifier.width(6.dp))
                     Text(
                         stringResource(
-                            if (installed.pendingUninstall) R.string.plugin_undo else R.string.plugin_uninstall
+                            when {
+                                installed.pendingUninstall -> R.string.plugin_undo
+                                pendingConfirm -> R.string.plugin_confirm_uninstall
+                                else -> R.string.plugin_uninstall
+                            }
                         )
                     )
                 }

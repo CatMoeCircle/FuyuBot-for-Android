@@ -6,12 +6,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.CatMoeCircle.fuyutd.ui.LocalUiMode
 import com.CatMoeCircle.fuyutd.ui.UiMode
 import com.CatMoeCircle.fuyutd.ui.navigation3.LocalNavigator
 import com.CatMoeCircle.fuyutd.ui.navigation3.Route
-import com.CatMoeCircle.fuyutd.ui.viewmodel.PluginViewModel
+import com.CatMoeCircle.fuyutd.ui.viewmodel.LocalPluginViewModel
 
 /**
  * 插件页：本地已安装插件（带启用开关 / 卸载 / 重启）。
@@ -27,7 +26,7 @@ fun PluginPage(
     onRebootKernel: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    val viewModel = viewModel<PluginViewModel>()
+    val viewModel = LocalPluginViewModel.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val navigator = LocalNavigator.current
 
@@ -45,6 +44,8 @@ fun PluginPage(
         onOpenRepo = { navigator.push(Route.PluginRepo) },
         onToggleEnabled = viewModel::setEnabled,
         onUninstall = viewModel::uninstall,
+        onRequestConfirmUninstall = viewModel::requestUninstallConfirm,
+        onRestoreUninstall = viewModel::restoreUninstall,
         onUndoUninstall = viewModel::undoUninstall,
         onToggleExpanded = viewModel::toggleExpanded,
         onInstall = viewModel::install,
@@ -58,4 +59,12 @@ fun PluginPage(
         UiMode.Miuix -> PluginPageMiuix(uiState, actions, bottomInnerPadding)
         UiMode.Material -> PluginPageMaterial(uiState, actions, bottomInnerPadding)
     }
+
+    // 内核停止时删除不可恢复：先划掉，再点「确认卸载」弹窗确认；运行中删除走「待卸载 + 撤销」。
+    PluginUninstallDialog(
+        pending = uiState.uninstallPending,
+        visible = uiState.uninstallDialogVisible,
+        onDismiss = viewModel::dismissUninstallDialog,
+        onConfirm = viewModel::confirmUninstall,
+    )
 }

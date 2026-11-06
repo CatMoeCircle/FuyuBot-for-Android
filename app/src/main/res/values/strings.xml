@@ -147,13 +147,14 @@
 
     <string name="fuyu_config_title">配置</string>
     <string name="fuyu_error_title">无法启动</string>
-    <string name="fuyu_config_summary">首次使用需要填写 Telegram API 凭据，登录后即可启动</string>
+    <string name="fuyu_config_summary">首次使用需要填写 api_id 与 api_hash（Telegram API 凭据），登录后即可启动</string>
     <string name="fuyu_config_api_id">api_id</string>
-    <string name="fuyu_config_api_id_hint">例如 12345678</string>
+    <string name="fuyu_config_api_id_hint">请输入 api_id</string>
     <string name="fuyu_config_api_hash">api_hash</string>
-    <string name="fuyu_config_api_hash_hint">32 位十六进制字符串</string>
+    <string name="fuyu_config_api_hash_hint">请输入 api_hash</string>
+    <string name="fuyu_config_doc_link">如何获取 api_id / api_hash？点击查看文档</string>
     <string name="fuyu_config_bot_token">bot_token（可选）</string>
-    <string name="fuyu_config_bot_token_hint">留空走真人登录</string>
+    <string name="fuyu_config_bot_token_hint">Bot Token 留空登录 user账户</string>
     <string name="fuyu_config_error_id">api_id 必须是正整数</string>
     <string name="fuyu_config_error_hash">api_hash 不能为空</string>
     <string name="fuyu_start">启动</string>
@@ -176,6 +177,11 @@
     <string name="plugin_downloading">正在下载 %1$d%%</string>
     <string name="plugin_installed">已安装</string>
     <string name="plugin_uninstall">卸载</string>
+    <string name="plugin_confirm_uninstall">确认卸载</string>
+    <string name="plugin_restore">还原</string>
+    <string name="plugin_uninstall_confirm_title">确认卸载</string>
+    <string name="plugin_uninstall_confirm_message">删除后会删除该插件的数据目录，依赖这个插件的插件可能会加载失败</string>
+    <string name="plugin_uninstall_confirm_action">确认</string>
     <string name="plugin_restart_needed">重启后生效</string>
     <string name="plugin_pending_uninstall">待卸载</string>
     <string name="plugin_supported_platforms">仅支持以下平台</string>

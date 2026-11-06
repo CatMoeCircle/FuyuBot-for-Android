@@ -84,7 +84,9 @@ import com.CatMoeCircle.fuyutd.ui.theme.LocalEnableFloatingBottomBarBlur
 import com.CatMoeCircle.fuyutd.ui.theme.ThemeController
 import com.CatMoeCircle.fuyutd.ui.util.rememberBlurBackdrop
 import com.CatMoeCircle.fuyutd.ui.viewmodel.HomeViewModel
+import com.CatMoeCircle.fuyutd.ui.viewmodel.LocalPluginViewModel
 import com.CatMoeCircle.fuyutd.ui.viewmodel.LocalSettingsViewModel
+import com.CatMoeCircle.fuyutd.ui.viewmodel.PluginViewModel
 import com.CatMoeCircle.fuyutd.ui.viewmodel.SettingsViewModel
 import com.CatMoeCircle.fuyutd.ui.viewmodel.UpdateViewModel
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -148,6 +150,9 @@ class MainActivity : ComponentActivity() {
             val updateState by updateViewModel.uiState.collectAsStateWithLifecycle()
             val homeViewModel = viewModel<HomeViewModel>()
             val homeState by homeViewModel.uiState.collectAsStateWithLifecycle()
+            // 插件页与插件仓库页是两条导航条目，各自 viewModel() 会拿到不同实例；
+            // 统一在这里创建，保证在仓库页安装后插件页能立刻看到最新的已安装列表。
+            val pluginViewModel = viewModel<PluginViewModel>()
             val configDialog by homeViewModel.configDialog.collectAsStateWithLifecycle()
             val homeError by homeViewModel.error.collectAsStateWithLifecycle()
             val homeAsk by homeViewModel.ask.collectAsStateWithLifecycle()
@@ -170,6 +175,7 @@ class MainActivity : ComponentActivity() {
                 LocalNavigator provides navigator,
                 LocalDensity provides scaledDensity,
                 LocalSettingsViewModel provides settingsViewModel,
+                LocalPluginViewModel provides pluginViewModel,
                 LocalColorMode provides appSettings.colorMode.value,
                 LocalEnableBlur provides uiState.enableBlur,
                 LocalEnableFloatingBottomBar provides uiState.enableFloatingBottomBar,

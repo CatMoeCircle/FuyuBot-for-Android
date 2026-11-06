@@ -1,5 +1,6 @@
 package com.CatMoeCircle.fuyutd.ui.component.fuyubot
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -9,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.CatMoeCircle.fuyutd.R
@@ -29,6 +31,7 @@ fun FuyuBotConfigDialogMiuix(
     onApiIdChange: (TextFieldValue) -> Unit,
     onApiHashChange: (TextFieldValue) -> Unit,
     onBotTokenChange: (TextFieldValue) -> Unit,
+    onOpenDocs: () -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -80,6 +83,15 @@ fun FuyuBotConfigDialogMiuix(
                         modifier = Modifier.padding(bottom = 12.dp),
                     )
                 }
+                Text(
+                    text = stringResource(R.string.fuyu_config_doc_link),
+                    color = colorScheme.primary,
+                    fontSize = 13.sp,
+                    textDecoration = TextDecoration.Underline,
+                    modifier = Modifier
+                        .padding(bottom = 12.dp)
+                        .clickable(onClick = onOpenDocs),
+                )
                 Row {
                     TextButton(
                         text = stringResource(android.R.string.cancel),

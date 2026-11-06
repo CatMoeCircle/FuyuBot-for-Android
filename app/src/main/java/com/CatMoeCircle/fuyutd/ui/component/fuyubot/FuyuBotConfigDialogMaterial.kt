@@ -1,5 +1,6 @@
 package com.CatMoeCircle.fuyutd.ui.component.fuyubot
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -14,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.CatMoeCircle.fuyutd.R
 
@@ -27,6 +29,7 @@ fun FuyuBotConfigDialogMaterial(
     onApiIdChange: (TextFieldValue) -> Unit,
     onApiHashChange: (TextFieldValue) -> Unit,
     onBotTokenChange: (TextFieldValue) -> Unit,
+    onOpenDocs: () -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -84,6 +87,14 @@ fun FuyuBotConfigDialogMaterial(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.fuyu_config_doc_link),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    textDecoration = TextDecoration.Underline,
+                    modifier = Modifier.clickable(onClick = onOpenDocs),
+                )
             }
         },
         confirmButton = {

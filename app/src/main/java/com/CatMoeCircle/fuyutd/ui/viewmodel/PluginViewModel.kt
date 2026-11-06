@@ -35,7 +35,7 @@ import kotlinx.coroutines.launch
  * 2. 本地注册表（[PluginStore]）——哪些已安装、是否启用、是否需重启生效。
  *
  * 内核在运行时做增删 / 启停都只改磁盘并标记「待重启」，由 [HomeViewModel.stop]
- * 在停稳后真正删除「待卸载」文件；下次内核启动即按当前文件加载。
+ * 在停稳后真正删除「待卸载」文件并清掉「待重启」标记；下次内核启动即按当前文件加载。
  */
 class PluginViewModel(
     private val repository: PluginRepository = PluginRepository(),
@@ -70,6 +70,14 @@ class PluginViewModel(
                     if (loaded) rebuildItems()
                 }
         }
+
+        // 注册表被别处改写时跟着重建：内核停止 / 重启后由 [HomeViewModel] 清掉「待重启」标记，
+        // 界面必须同步消失，否则会一直显示已经失效的「重启后生效」。
+        viewModelScope.launch {
+            PluginStore.revision.collect {
+                if (loaded) rebuildItems()
+            }
+        }
     }
 
     /** 进入页面 / 回到前台时调用。 */
@@ -91,17 +99,31 @@ class PluginViewModel(
         if (loaded) rebuildItems()
     }
 
-    /** 重新拉取远程索引。 */
+    /**
+     * 重新加载：本地优先，网络辅助。
+     *
+     * 先直接读磁盘上的插件（[PluginStore.installedIncludingSystem]）并出列表，
+     * 不等待网络；远程索引只用来补全商城列表与本地插件的名称 / 简介。
+     * 因此断网时页面仍有完整的本地插件，而不是一片空白。
+     */
     fun reload() {
         val context = appContext ?: return
         _uiState.update {
             it.copy(loading = true, loadStatus = PluginLoadStatus.Loading, loadError = null)
         }
+        // 本地立即出结果：断网 / 网络超时都只影响商城列表，不影响本地插件。
+        PluginStore.reconcile(context)
+        rebuildItems()
+        // 本地数据已经出来了，刷新指示器停掉；远程索引继续在后台补全，不阻塞页面。
+        _uiState.update { it.copy(loading = false) }
         viewModelScope.launch {
             repository.fetchIndex(indexUrl).fold(
                 onSuccess = { plugins ->
                     allPlugins = plugins
                     PluginStore.reconcile(context)
+                    _uiState.update {
+                        it.copy(loadStatus = PluginLoadStatus.Success, loadError = null)
+                    }
                     rebuildItems()
                 },
                 onFailure = { error ->
@@ -210,25 +232,91 @@ class PluginViewModel(
         }
     }
 
-    /** 卸载一个本地插件；内核运行中则标记「待卸载」，未运行则删文件。 */
+    /**
+     * 点插件卡片上的「卸载」。
+     *
+     * - 内核运行中：标记「待卸载」，并把插件挪到停用位置——重启内核后不会再加载它；
+     *   文件等内核停止后再删，界面可「撤销」；
+     * - 内核未运行：先把卡片划掉、按钮变成「确认卸载」（[uninstallPending]），
+     *   真正删除要等用户点「确认卸载」并在弹窗里再确认一次。
+     */
     fun uninstall(installed: InstalledPlugin) {
         val context = appContext ?: return
         val id = installed.id
         if (activeJobs[id]?.isActive == true) return
+        // 已经是待卸载 / 待确认状态，重复点「卸载」不应覆盖原状态（例如仓库页详情）。
+        if (installed.pendingUninstall || installed.id == _uiState.value.uninstallPending?.id) return
+
+        if (!kernelRunning) {
+            _uiState.update {
+                it.copy(uninstallPending = installed, uninstallDialogVisible = false)
+            }
+            // 重新算一遍列表，让卡片立刻变成「划掉 + 确认卸载」。
+            rebuildItems()
+            return
+        }
 
         viewModelScope.launch {
-            PluginInstaller.uninstall(context, installed, kernelRunning).fold(
+            PluginInstaller.uninstall(context, installed, kernelRunning = true).fold(
                 onSuccess = { rebuildItems() },
                 onFailure = { error -> setItemError(id, error.message ?: error.javaClass.simpleName) },
             )
         }
     }
 
-    /** 撤销「待卸载」。 */
+    /** 点「确认卸载」：为已划掉的插件弹出确认弹窗。 */
+    fun requestUninstallConfirm() {
+        if (_uiState.value.uninstallPending == null) return
+        _uiState.update { it.copy(uninstallDialogVisible = true) }
+    }
+
+    /** 关掉「确认卸载」弹窗；已划掉的状态保留，可稍后再点「确认卸载」。 */
+    fun dismissUninstallDialog() {
+        _uiState.update { it.copy(uninstallDialogVisible = false) }
+    }
+
+    /** 点「还原」：取消划掉/待确认状态，插件恢复原样。 */
+    fun restoreUninstall() {
+        if (_uiState.value.uninstallPending == null) return
+        _uiState.update { it.copy(uninstallPending = null, uninstallDialogVisible = false) }
+        rebuildItems()
+    }
+
+    /**
+     * 确认删除：内核未运行时真正删掉插件目录与注册信息。
+     *
+     * 确认期间内核若已经被启动，则退回「待卸载」流程，等内核停止后再删。
+     */
+    fun confirmUninstall() {
+        val context = appContext ?: return
+        val installed = _uiState.value.uninstallPending ?: return
+        _uiState.update { it.copy(uninstallPending = null, uninstallDialogVisible = false) }
+        // 先恢复卡片（万一下面的删除失败，界面也不会一直停在「确认卸载」）。
+        rebuildItems()
+
+        viewModelScope.launch {
+            PluginInstaller.uninstall(context, installed, kernelRunning).fold(
+                onSuccess = { rebuildItems() },
+                onFailure = {
+                    setItemError(installed.id, it.message ?: it.javaClass.simpleName)
+                },
+            )
+        }
+    }
+
+    /** 撤销「待卸载」：把插件挪回启用位置；内核运行中若已不再加载它，需要重启才生效。 */
     fun undoUninstall(installed: InstalledPlugin) {
         val context = appContext ?: return
+        val pluginDirPath = KernelManager.pluginDir(context).absolutePath
+        // 卸载时插件已被挪走；如果内核报告里还有它，说明当前会话仍加载着它，撤销不需要重启。
+        val stillLoaded = kernelReport?.plugins
+            ?.any { it.matches(pluginDirPath, installed) } == true
         viewModelScope.launch {
-            PluginInstaller.undoUninstall(context, installed).fold(
+            PluginInstaller.undoUninstall(
+                context = context,
+                installed = installed,
+                kernelRunning = kernelRunning && !stillLoaded,
+            ).fold(
                 onSuccess = { rebuildItems() },
                 onFailure = { },
             )
@@ -294,6 +382,7 @@ class PluginViewModel(
         val kernelPlugins = kernelReport?.plugins.orEmpty()
         val pluginDirPath = KernelManager.pluginDir(context).absolutePath
         val matchedKernel = mutableSetOf<KernelPluginInfo>()
+        val stagedId = state.uninstallPending?.id
         val installedItems = PluginStore.installedIncludingSystem(context).map { registered ->
             val kernelInfo = kernelPlugins
                 .firstOrNull { it !in matchedKernel && it.matches(pluginDirPath, registered) }
@@ -302,6 +391,7 @@ class PluginViewModel(
                 installed = registered,
                 info = pluginById[registered.id],
                 kernel = kernelInfo,
+                confirmUninstall = registered.id == stagedId,
             )
         }
         // 内核里有、注册表里对应不上的条目：单独列出，不要因为匹配不上就丢掉。
@@ -309,16 +399,19 @@ class PluginViewModel(
 
         val rebootNeeded = installedItems.any { it.installed.pendingRestart || it.installed.pendingUninstall }
 
+        // 划掉待确认的插件跟着最新注册表刷新；已经不在列表里（例如别处删掉了）就收起弹窗。
+        val uninstallPending = installedItems.firstOrNull { it.confirmUninstall }?.installed
+        val uninstallDialogVisible = uninstallPending != null && state.uninstallDialogVisible
+
         _uiState.update {
             it.copy(
-                loading = false,
-                loadStatus = PluginLoadStatus.Success,
-                loadError = null,
                 installed = installedItems,
                 kernelSkipped = kernelReport?.skippedPlugins.orEmpty(),
                 kernelOrphans = kernelOrphans,
                 repoItems = repoItems,
                 rebootNeeded = rebootNeeded,
+                uninstallPending = uninstallPending,
+                uninstallDialogVisible = uninstallDialogVisible,
             )
         }
     }
