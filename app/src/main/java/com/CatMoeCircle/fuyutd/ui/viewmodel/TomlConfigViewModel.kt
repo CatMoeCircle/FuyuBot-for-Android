@@ -265,6 +265,11 @@ class TomlConfigViewModel : ViewModel() {
         }
     }
 
+    /** 内核已按新配置重启成功，清除「待重启」提示。 */
+    fun markRestartApplied() {
+        _uiState.update { it.copy(restartRequired = false) }
+    }
+
     private companion object {
         const val MAX_CONFIG_CHARS = 1_000_000
     }

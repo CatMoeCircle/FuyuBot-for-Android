@@ -38,7 +38,7 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
 @Composable
 fun TomlConfigScreen(
     kernelRunning: Boolean,
-    onRestartKernel: () -> Unit,
+    onRestartKernel: (onComplete: () -> Unit) -> Unit,
 ) {
     val navigator = LocalNavigator.current
     val viewModel = viewModel<TomlConfigViewModel>()
@@ -260,7 +260,9 @@ fun TomlConfigScreen(
             exportLauncher.launch("fuyubot.toml")
         },
         onRequestReset = { showResetConfirm = true },
-        onRestartKernel = onRestartKernel,
+        onRestartKernel = {
+            onRestartKernel { viewModel.markRestartApplied() }
+        },
     )
     val toolbarActions = TomlEditorToolbarActions(
         onUndo = ::undo,

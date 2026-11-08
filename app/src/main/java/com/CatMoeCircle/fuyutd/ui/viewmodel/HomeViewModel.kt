@@ -314,7 +314,7 @@ class HomeViewModel : ViewModel() {
         }
     }
 
-    private suspend fun doStart(context: Context) {
+    private suspend fun doStart(context: Context): Result<Unit> {
         // 每次启动都从干净日志开始：内核是追加写 fuyubot.log 的，不主动清掉的话，
         // 上一次运行的报错会一直混在本次日志里，看上去像这次的错。
         withContext(Dispatchers.IO) { LogRepository.clear(context) }
@@ -323,20 +323,19 @@ class HomeViewModel : ViewModel() {
         // 启动前内核已经在跑时 nativeStart 会返回 BUSY，不会重新按磁盘加载插件：
         // 那种情况下「待重启」仍然成立，不能清标记。
         val wasRunning = runtime.isRunning
-        runtime.start(context, transientBotToken).fold(
-            onSuccess = {
-                // 内核按磁盘现状重新加载插件后，之前的「待重启」标记随之失效。
-                // 不管这次启动是首页「启动」还是插件页「重启」发起的，都走这里清掉。
-                if (!wasRunning) {
-                    runCatching { PluginStore.clearAllPendingRestart(context) }
-                }
-            },
-            onFailure = { error ->
-                _error.value = HomeError.Runtime(
-                    error.message ?: error.javaClass.simpleName
-                )
-            },
-        )
+        val started = runtime.start(context, transientBotToken)
+        started.onSuccess {
+            // 内核按磁盘现状重新加载插件后，之前的「待重启」标记随之失效。
+            // 不管这次启动是首页「启动」还是插件页「重启」发起的，都走这里清掉。
+            if (!wasRunning) {
+                runCatching { PluginStore.clearAllPendingRestart(context) }
+            }
+        }.onFailure { error ->
+            _error.value = HomeError.Runtime(
+                error.message ?: error.javaClass.simpleName
+            )
+        }
+        return started.map { }
     }
 
     /** 保存配置并继续启动。 */
@@ -404,8 +403,11 @@ class HomeViewModel : ViewModel() {
      *
      * 重启**不删除**「待卸载」的插件，但它发起卸载时已经被挪到停用位置，
      * 所以重启后内核不会再加载它；文件要等内核真正停止（首页「停止」）时才删除。
+     *
+     * [onComplete] 只在重新启动成功后回调，调用方可据此清掉自己的「待重启」提示；
+     * 启动失败时保持提示，避免配置其实还没生效却被当成完成。
      */
-    fun restartKernel() {
+    fun restartKernel(onComplete: () -> Unit = {}) {
         if (restartJob?.isActive == true) return
         restartJob = viewModelScope.launch(Dispatchers.IO) {
             val context = appContext ?: return@launch
@@ -418,8 +420,13 @@ class HomeViewModel : ViewModel() {
                 delay(1_200L)
             }
             if (withContext(Dispatchers.IO) { configFor(context).isAuthorized }) {
-                // doStart 成功后自行清掉「待重启」标记（与首页直接启动同一套逻辑）。
-                doStart(context)
+                // 如果停止失败、内核仍在运行，start 只会返回 BUSY，配置不会被重新加载，
+                // 这种情况下不能通知调用方「已重启完成」。
+                val stillRunning = runtime.isRunning
+                val started = doStart(context)
+                if (started.isSuccess && !stillRunning) {
+                    withContext(Dispatchers.Main) { onComplete() }
+                }
             }
         }
     }

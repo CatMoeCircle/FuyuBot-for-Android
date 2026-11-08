@@ -227,7 +227,9 @@ class MainActivity : ComponentActivity() {
                             entry<Route.TomlConfig>(swipeDismiss = swipeDismiss) {
                                 TomlConfigScreen(
                                     kernelRunning = homeState.isRunning,
-                                    onRestartKernel = homeViewModel::restartKernel,
+                                    onRestartKernel = { onComplete ->
+                                        homeViewModel.restartKernel(onComplete)
+                                    },
                                 )
                             }
                             entry<Route.UpdateCheck>(swipeDismiss = swipeDismiss) {
