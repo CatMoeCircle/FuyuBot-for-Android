@@ -232,9 +232,7 @@ data class FuyuBotRuntimeState(
  * 负责：加载 `.so`、注册回调、把工作线程回调转发到 [StateFlow]。
  * 不声明任何 Android 组件 / 权限 / 唤醒锁，保活由上层（前台 Service）负责。
  */
-class FuyuBotRuntime(
-    private val config: FuyuBotConfigRepository,
-) {
+class FuyuBotRuntime {
 
     private val _state = MutableStateFlow(FuyuBotRuntimeState())
     val state: StateFlow<FuyuBotRuntimeState> = _state.asStateFlow()
@@ -368,19 +366,26 @@ class FuyuBotRuntime(
     }
 
     /** 启动运行时；返回底层返回码。 */
-    suspend fun start(context: android.content.Context): Result<Int> =
+    suspend fun start(
+        context: android.content.Context,
+        transientBotToken: String? = null,
+    ): Result<Int> =
         withContext(Dispatchers.IO) {
             runCatching {
                 // 数据、日志和用户插件放在应用专属外置目录；内核只从私有只读副本加载插件。
                 KernelManager.prepareRuntime(context).getOrThrow()
-                val options = config.buildOptionsJson(KernelManager.paths(context))
+                val config = FuyuBotConfigRepository(context)
+                    .buildRuntimeConfig(
+                        paths = KernelManager.paths(context),
+                        transientBotToken = transientBotToken,
+                    )
                     ?: error("缺少 api_id / api_hash")
                 ensureLoaded(context).getOrThrow()
                 val handle = native!!
                 if (!handle.nativeIsRunning()) {
-                    KernelManager.syncRuntimePlugins(context).getOrThrow()
+                    KernelManager.syncRuntimePlugins(context, config.pluginDir).getOrThrow()
                 }
-                val code = handle.nativeStart(options)
+                val code = handle.nativeStart(config.optionsJson)
                 // 返回码只说「线程起来没有」；真正的原因在内核的 last_error 里，
                 // 且它是线程局部的，必须就地读。BUSY 按成功处理：内核 start 是幂等的。
                 if (code != Native.RESULT_OK && code != Native.RESULT_BUSY) {
@@ -513,12 +518,11 @@ class FuyuBotRuntime(
          * [HomeViewModel] 实例（Activity 重建会换新实例）必须共用同一份运行时，
          * 否则重建后 [state] 归零、回调也接不到。
          *
-         * 构造只依赖 [FuyuBotConfigRepository]（读 AppPrefs，不需要 Context），
-         * 所以这里不需要 applicationContext。
+         * 配置在每次启动时按当前 Context 从 `fuyubot.toml` 读取，因此实例本身无状态。
          */
         fun instance(): FuyuBotRuntime =
             shared ?: synchronized(this) {
-                shared ?: FuyuBotRuntime(FuyuBotConfigRepository()).also { shared = it }
+                shared ?: FuyuBotRuntime().also { shared = it }
             }
 
         /**

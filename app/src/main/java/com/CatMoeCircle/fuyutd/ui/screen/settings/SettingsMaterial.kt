@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DisplaySettings
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.SystemUpdate
@@ -97,6 +98,27 @@ fun SettingPagerMaterial(
                         )
                     },
                 ),
+            )
+
+            SegmentedColumn(
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
+                content = listOf {
+                    SegmentedListItem(
+                        onClick = actions.onOpenTomlConfig,
+                        leadingContent = {
+                            Icon(
+                                Icons.Rounded.Description,
+                                contentDescription = stringResource(R.string.settings_toml_config),
+                            )
+                        },
+                        headlineContent = {
+                            Text(stringResource(R.string.settings_toml_config))
+                        },
+                        supportingContent = {
+                            Text(stringResource(R.string.settings_toml_config_summary))
+                        },
+                    )
+                },
             )
 
             // 「检查更新」独立成组，不与界面风格、主题设置混排。

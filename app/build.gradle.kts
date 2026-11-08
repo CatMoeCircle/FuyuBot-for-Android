@@ -94,5 +94,6 @@ dependencies {
     implementation(libs.commonmark.ext.gfm.tables)
     implementation(libs.commonmark.ext.gfm.strikethrough)
     implementation(libs.commonmark.ext.autolink)
+    implementation(libs.tomlj)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

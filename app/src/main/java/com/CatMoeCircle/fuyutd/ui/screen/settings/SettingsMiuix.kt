@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DisplaySettings
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.SystemUpdate
@@ -114,6 +115,25 @@ fun SettingPagerMiuix(
                                 )
                             },
                             onClick = actions.onOpenTheme,
+                        )
+                    }
+                    Card(
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .fillMaxWidth(),
+                    ) {
+                        ArrowPreference(
+                            title = stringResource(R.string.settings_toml_config),
+                            summary = stringResource(R.string.settings_toml_config_summary),
+                            startAction = {
+                                Icon(
+                                    Icons.Rounded.Description,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    contentDescription = stringResource(R.string.settings_toml_config),
+                                    tint = colorScheme.onBackground,
+                                )
+                            },
+                            onClick = actions.onOpenTomlConfig,
                         )
                     }
                     Card(

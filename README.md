@@ -57,6 +57,7 @@ unzip -l app/build/outputs/apk/release/*.apk | grep assets/fuyubot-kernel
 - **内置内核自动安装**：内核随 APK 打包，首次启动自动释放到 `filesDir/fuyubot-kernel/`；
   App 更新后会检查内置内核版本并自动重装，无需单独更新内核或手动清数据。
 - **应用内更新检查**：读取 GitHub Release 判断新版本，并打开 Release 页面供用户下载配套 APK。
+- **TOML 配置中心**：在 App 内编辑完整 `fuyubot.toml`，保存前校验，并支持导入、导出与恢复模板。
 
 ---
 
@@ -343,7 +344,9 @@ unzip -l app/build/outputs/apk/release/*.apk \
    `filesDir/fuyubot-kernel/`（约 48 MB），首页启动按钮上显示安装进度。
 2. 在配置弹窗中填写 Telegram 的 `api_id` / `api_hash`
    （在 <https://my.telegram.org> 申请）；想跑 Bot 就再填 `bot_token`，
-   留空则走手机号 / 验证码 / 两步验证登录。
+   留空则走手机号 / 验证码 / 两步验证登录。配置会写入
+   `Android/data/com.CatMoeCircle.fuyutd/files/fuyubot.toml`，与桌面版使用同一套格式；
+   Bot Token 按官方约定只用于本次启动，不落盘。
 3. 点击首页的启动按钮。登录问题会以弹窗形式出现，按提示回答即可；
    扫码登录（其它设备确认）当前版本只展示链接、不支持在本机确认。
 4. 登录状态由 TDLib 自己落盘，下次启动直接恢复，无需重复登录。
@@ -353,7 +356,35 @@ unzip -l app/build/outputs/apk/release/*.apk \
 - `fuyubot-data/`：TDLib 数据库与登录态；
 - `fuyubot-plugins/`：用户插件目录，支持平铺 `.so`、`.so.disable` 和目录包；
 - `logs/`：内核日志，应用内「日志」页读取 `logs/fuyubot.log`；
-- `fuyubot.toml` / `plugin-config/`：内核与插件的配置文件（存在时使用）。
+- `fuyubot.toml`：账号、插件目录、日志级别、TDLib 参数与 `[plugin.*]` 插件配置的唯一来源；
+- `plugin-config/`：插件运行期通过 `set_config` 写回自己的配置段。
+
+`fuyubot.toml` 与桌面版结构一致。常见字段：
+
+```toml
+[telegram]
+account_type = "bot" # bot / user
+api_id = 12345
+api_hash = "……"
+data_dir = "fuyubot-data"
+
+[plugins]
+dir = "fuyubot-plugins"
+log_level = "info"
+
+[tdlib]
+path = ""
+log_verbosity = 1
+
+[plugin.fuyubot.manage]
+reply_prefix = "已安装："
+```
+
+相对路径均以配置文件所在目录为根。运行中的 App 不会覆盖用户手写的注释和插件段。
+
+设置页的「TOML 配置」提供带行号和 TOML 语法高亮的完整编辑器，并提供撤销、重做、
+查找替换、跳行、格式化和校验工具。保存前会显示语法或字段错误；导入会先进入编辑器，
+确认保存后才生效。导出可用于备份，恢复模板会覆盖当前账号配置和插件段，执行前会二次确认。
 
 内核本体仍单独保存在 `filesDir/fuyubot-kernel/`；旧版本保存在应用私有目录里的
 数据、日志和插件会在首次启动新版时迁到上述外置目录。

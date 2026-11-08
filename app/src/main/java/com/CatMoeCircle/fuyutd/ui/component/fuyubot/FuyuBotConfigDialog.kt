@@ -19,7 +19,9 @@ private const val CONFIG_DOCS_URL =
         "#%E8%B5%B7%E4%B8%80%E4%B8%AA-bot-%E9%A1%B9%E7%9B%AE"
 
 /**
- * 首次授权配置弹窗：api_id / api_hash 必填，bot_token 可选。
+ * 首次授权配置弹窗：账号信息最终写入官方 `fuyubot.toml`。
+ *
+ * `api_id` / `api_hash` 必填；Bot Token 可选，只用于本次启动，不写入 TOML。
  *
  * 装配函数：管理输入状态，分发到 Miuix / Material 两套实现。
  */

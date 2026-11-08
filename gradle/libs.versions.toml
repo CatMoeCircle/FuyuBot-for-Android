@@ -10,6 +10,7 @@ material3 = "1.5.0-alpha28"
 materialKolor = "5.0.1"
 hiddenApiBypass = "6.1"
 commonmark = "0.30.0"
+tomlj = "2.2.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -35,6 +36,7 @@ commonmark = { group = "org.commonmark", name = "commonmark", version.ref = "com
 commonmark-ext-gfm-tables = { group = "org.commonmark", name = "commonmark-ext-gfm-tables", version.ref = "commonmark" }
 commonmark-ext-gfm-strikethrough = { group = "org.commonmark", name = "commonmark-ext-gfm-strikethrough", version.ref = "commonmark" }
 commonmark-ext-autolink = { group = "org.commonmark", name = "commonmark-ext-autolink", version.ref = "commonmark" }
+tomlj = { group = "org.tomlj", name = "tomlj", version.ref = "tomlj" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

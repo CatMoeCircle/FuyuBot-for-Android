@@ -33,6 +33,7 @@ fun SettingPager(
 
     val actions = SettingsScreenActions(
         onOpenTheme = { navigator.push(Route.ColorPalette) },
+        onOpenTomlConfig = { navigator.push(Route.TomlConfig) },
         onOpenUpdate = { navigator.push(Route.UpdateCheck) },
         onSetUiModeIndex = { index ->
             viewModel.setUiMode(

@@ -2,6 +2,7 @@ package com.CatMoeCircle.fuyutd.data.kernel
 
 import android.content.Context
 import android.content.res.AssetManager
+import com.CatMoeCircle.fuyutd.data.FuyuBotConfigRepository
 import com.CatMoeCircle.fuyutd.data.plugin.PluginStore
 import com.CatMoeCircle.fuyutd.data.update.CURRENT_KERNEL_VERSION
 import com.CatMoeCircle.fuyutd.data.update.compareVersion
@@ -146,8 +147,9 @@ object KernelManager {
     fun tdlibPath(context: Context): String? =
         File(kernelDir(context), TDLIB_LIBRARY).takeIf { it.isFile }?.absolutePath
 
-    /** 用户插件目录（`Android/data/<包名>/files/fuyubot-plugins`）。 */
-    fun pluginDir(context: Context): File = File(storageDir(context), PLUGIN_DIR_NAME)
+    /** 用户插件目录，由 `fuyubot.toml` 的 `[plugins].dir` 决定。 */
+    fun pluginDir(context: Context): File =
+        FuyuBotConfigRepository(context).pluginSourceDir()
 
     /** 内核启动时实际加载的私有插件副本。 */
     fun runtimePluginDir(context: Context): File =
@@ -179,8 +181,10 @@ object KernelManager {
      * 每次启动内核前整体重建，确保用户手工增删 / 替换的插件会被完整带过去；
      * 副本按 targetSdk 34+ 的要求设为只读。
      */
-    fun syncRuntimePlugins(context: Context): Result<Unit> = runCatching {
-        val source = pluginDir(context)
+    fun syncRuntimePlugins(
+        context: Context,
+        source: File = pluginDir(context),
+    ): Result<Unit> = runCatching {
         val target = runtimePluginDir(context)
         if (target.exists()) target.deleteRecursively()
         if (source.isDirectory) {

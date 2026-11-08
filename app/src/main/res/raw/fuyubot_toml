@@ -1,0 +1,29 @@
+# Fuyu-Bot configuration shared with the desktop edition.
+
+[bot]
+name = "fuyubot"
+
+[telegram]
+# account_type = "bot" or "user".
+account_type = "bot"
+# Get these from https://my.telegram.org.
+api_id = 0
+data_dir = "fuyubot-data"
+# api_hash is a credential. Do not commit this file to a public repository.
+api_hash = ""
+
+[plugins]
+# Relative paths are resolved from the directory containing this file.
+dir = "fuyubot-plugins"
+# Plugin log level: error / warn / info / debug / trace.
+log_level = "info"
+
+[tdlib]
+# Empty uses the tdjson bundled with the Android kernel.
+path = ""
+# TDLib's own log verbosity. Use 0 for quiet, 1 for warnings and errors.
+log_verbosity = 1
+
+# Add plugin-specific sections here, for example:
+# [plugin.fuyubot.manage]
+# reply_prefix = "Installed: "

@@ -25,6 +25,7 @@ data class SettingsUiState(
 @Immutable
 data class SettingsScreenActions(
     val onOpenTheme: () -> Unit,
+    val onOpenTomlConfig: () -> Unit,
     val onOpenUpdate: () -> Unit,
     val onSetUiModeIndex: (Int) -> Unit,
 )

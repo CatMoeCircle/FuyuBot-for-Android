@@ -10,6 +10,7 @@ import top.yukonga.miuix.kmp.nav.core.NavKey
 sealed interface Route : NavKey {
     data object Main : Route
     data object ColorPalette : Route
+    data object TomlConfig : Route
     data object UpdateCheck : Route
     data object PluginRepo : Route
 }

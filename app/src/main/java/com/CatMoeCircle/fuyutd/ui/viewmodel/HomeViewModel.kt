@@ -43,7 +43,8 @@ import java.util.Locale
  */
 class HomeViewModel : ViewModel() {
 
-    private val config = FuyuBotConfigRepository()
+    private var config: FuyuBotConfigRepository? = null
+    private var transientBotToken: String? = null
     // 进程级单例：前台 Service 与 Activity 重建后的新 ViewModel 共用同一个运行时，
     // 状态与回调不会随界面重建而丢失。
     private val runtime = FuyuBotRuntime.instance()
@@ -182,6 +183,7 @@ class HomeViewModel : ViewModel() {
     fun bind(context: Context) {
         val appContext = context.applicationContext
         this.appContext = appContext
+        config = FuyuBotConfigRepository(appContext)
         prepareKernel(appContext)
         viewModelScope.launch(Dispatchers.IO) {
             pluginCount.value = KernelManager.pluginCount(appContext)
@@ -289,10 +291,21 @@ class HomeViewModel : ViewModel() {
         // 内核已内置并自动准备；按钮在准备中会禁用，不会走到这里。
         // 这里不再检查内核是否安装，直接进入授权配置与启动编排。
         startJob = viewModelScope.launch {
+            val repository = configFor(context)
+            val configurationError = withContext(Dispatchers.IO) {
+                repository.validationError()
+            }
+            if (configurationError != null) {
+                _error.value = HomeError.Runtime(
+                    "fuyubot.toml 配置错误：$configurationError"
+                )
+                return@launch
+            }
+            val authorized = withContext(Dispatchers.IO) { repository.isAuthorized }
             when {
                 // 只有 api_id / api_hash 是硬性前提；bot_token 留空本来就表示走真人登录，
                 // 不该因为没填 token 又把配置弹窗弹回来挡住启动。
-                !config.isAuthorized -> {
+                !authorized -> {
                     _configDialog.value = true
                 }
 
@@ -310,7 +323,7 @@ class HomeViewModel : ViewModel() {
         // 启动前内核已经在跑时 nativeStart 会返回 BUSY，不会重新按磁盘加载插件：
         // 那种情况下「待重启」仍然成立，不能清标记。
         val wasRunning = runtime.isRunning
-        runtime.start(context).fold(
+        runtime.start(context, transientBotToken).fold(
             onSuccess = {
                 // 内核按磁盘现状重新加载插件后，之前的「待重启」标记随之失效。
                 // 不管这次启动是首页「启动」还是插件页「重启」发起的，都走这里清掉。
@@ -328,12 +341,25 @@ class HomeViewModel : ViewModel() {
 
     /** 保存配置并继续启动。 */
     fun saveConfig(context: Context, apiId: Int, apiHash: String, botToken: String) {
-        config.apiId = apiId
-        config.apiHash = apiHash
-        if (botToken.isNotBlank()) config.botToken = botToken
-        _configDialog.value = false
-        if (config.isAuthorized) {
-            startJob = viewModelScope.launch { doStart(context) }
+        val repository = configFor(context)
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                repository.writeAccount(apiId, apiHash, botToken)
+            }
+            if (saved.isFailure) {
+                val error = saved.exceptionOrNull()
+                _error.value = HomeError.Runtime(
+                    "写入 fuyubot.toml 失败：${
+                        error?.message ?: error?.javaClass?.simpleName ?: "未知错误"
+                    }"
+                )
+                return@launch
+            }
+            transientBotToken = botToken.trim().takeIf { it.isNotEmpty() }
+            _configDialog.value = false
+            if (withContext(Dispatchers.IO) { repository.isAuthorized }) {
+                startJob = viewModelScope.launch { doStart(context) }
+            }
         }
     }
 
@@ -391,12 +417,15 @@ class HomeViewModel : ViewModel() {
                 // nativeStop 上限 8 秒；给它留足收尾时间再起。
                 delay(1_200L)
             }
-            if (config.isAuthorized) {
+            if (withContext(Dispatchers.IO) { configFor(context).isAuthorized }) {
                 // doStart 成功后自行清掉「待重启」标记（与首页直接启动同一套逻辑）。
                 doStart(context)
             }
         }
     }
+
+    private fun configFor(context: Context): FuyuBotConfigRepository =
+        config ?: FuyuBotConfigRepository(context.applicationContext).also { config = it }
 
     private companion object {
         /** 未运行时的空转间隔：只为及时发现「开始运行」，无需每秒刷新。 */

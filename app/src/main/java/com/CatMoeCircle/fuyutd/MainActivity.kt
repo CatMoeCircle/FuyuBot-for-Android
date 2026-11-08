@@ -74,6 +74,7 @@ import com.CatMoeCircle.fuyutd.ui.screen.log.LogPage
 import com.CatMoeCircle.fuyutd.ui.screen.plugin.PluginPage
 import com.CatMoeCircle.fuyutd.ui.screen.plugin.PluginRepoScreen
 import com.CatMoeCircle.fuyutd.ui.screen.settings.SettingPager
+import com.CatMoeCircle.fuyutd.ui.screen.config.TomlConfigScreen
 import com.CatMoeCircle.fuyutd.ui.screen.update.UpdateCheckScreen
 import com.CatMoeCircle.fuyutd.ui.screen.update.UpdatePromptDialog
 import com.CatMoeCircle.fuyutd.ui.theme.FuyuTDTheme
@@ -222,6 +223,12 @@ class MainActivity : ComponentActivity() {
                             }
                             entry<Route.ColorPalette>(swipeDismiss = swipeDismiss) {
                                 ColorPaletteScreen()
+                            }
+                            entry<Route.TomlConfig>(swipeDismiss = swipeDismiss) {
+                                TomlConfigScreen(
+                                    kernelRunning = homeState.isRunning,
+                                    onRestartKernel = homeViewModel::restartKernel,
+                                )
                             }
                             entry<Route.UpdateCheck>(swipeDismiss = swipeDismiss) {
                                 UpdateCheckScreen()
