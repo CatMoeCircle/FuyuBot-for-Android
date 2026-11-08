@@ -20,11 +20,19 @@ data class ReleaseInfo(
     val assets: List<ReleaseAsset>,
 ) {
 
-    /** 按名称关键字挑第一个匹配的资产，找不到时回落到 Release 页面地址。 */
-    fun downloadUrlFor(vararg keywords: String): String {
-        val matched = assets.firstOrNull { asset ->
-            keywords.any { asset.name.contains(it, ignoreCase = true) }
+    /**
+     * 按设备支持的 ABI 顺序挑一个 Android APK。
+     *
+     * `Build.SUPPORTED_ABIS` 已按优先级排序，因此这里也按同样顺序找第一个匹配项。
+     * 找不到对应 APK 时返回 null，界面仍会打开 Release 页面让用户自行选择。
+     */
+    fun apkAssetForAbis(supportedAbis: List<String>): ReleaseAsset? {
+        val apkAssets = assets.filter { it.name.endsWith(".apk", ignoreCase = true) }
+        for (abi in supportedAbis) {
+            apkAssets.firstOrNull { asset ->
+                asset.name.contains(abi, ignoreCase = true)
+            }?.let { return it }
         }
-        return matched?.downloadUrl ?: htmlUrl
+        return null
     }
 }

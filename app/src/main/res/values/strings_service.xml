@@ -6,6 +6,7 @@
     <string name="kernel_service_status_starting">正在启动…</string>
     <string name="kernel_service_status_running">运行中</string>
     <string name="kernel_service_status_stopping">正在停止…</string>
+    <string name="kernel_service_status_stop_timeout">停止超时，内核仍在收尾</string>
     <string name="kernel_service_status_stopped">已停止</string>
     <string name="kernel_service_action_stop">停止</string>
 

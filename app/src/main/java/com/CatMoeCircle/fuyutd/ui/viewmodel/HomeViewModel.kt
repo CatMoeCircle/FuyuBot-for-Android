@@ -219,9 +219,10 @@ class HomeViewModel : ViewModel() {
                 onSuccess = {
                     if (worked) {
                         preparingProgress.value = 100
-                        viewModelScope.launch(Dispatchers.IO) {
-                            pluginCount.value = KernelManager.pluginCount(context)
-                        }
+                    }
+                    // 未安装新内核时也可能刚完成旧目录迁移，必须重读外置插件目录。
+                    viewModelScope.launch(Dispatchers.IO) {
+                        pluginCount.value = KernelManager.pluginCount(context)
                     }
                 },
                 onFailure = { error ->

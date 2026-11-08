@@ -8,6 +8,7 @@ import com.CatMoeCircle.fuyutd.data.update.compareVersion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.nio.file.Files
 
 /**
  * 内置内核（Fuyu-Bot 运行时）的本地安装管理。
@@ -28,10 +29,14 @@ import java.io.File
  * kernel-version        ← 本次安装的版本号
  * ```
  *
- * 运行期数据、日志与插件放在**安装目录之外**，内核升级不会丢：
- * - `filesDir/fuyubot-data/`     ← TDLib 数据库（登录态）
- * - `filesDir/fuyubot-plugins/`  ← 插件（内置插件也装到这里，已存在则不覆盖）
- * - `filesDir/logs/`             ← 运行日志
+ * 运行期数据、日志与插件放在应用专属外置存储（`Android/data/<包名>/files/`），
+ * 用户可以通过文件管理器直接查看和调整，内核升级也不会丢：
+ * - `fuyubot-data/`     ← TDLib 数据库（登录态）
+ * - `fuyubot-plugins/`  ← 用户可编辑的插件目录（内置插件也装到这里，已存在则不覆盖）
+ * - `logs/`             ← 运行日志
+ *
+ * 外置目录里的动态库不能直接交给内核加载，所以启动前会把插件同步到
+ * `filesDir/fuyubot-runtime-plugins/` 的私有只读副本；外置插件目录始终是源目录。
  *
  * 旧版把这些都塞在内核安装目录里，[migrateLegacyLayout] 会一次性把它们搬出来。
  */
@@ -43,14 +48,20 @@ object KernelManager {
     private const val MAIN_LIBRARY = "libfuyubotjni.so"
     private const val TDLIB_LIBRARY = "libtdjson.so"
 
-    /** 插件目录名：新布局放在 `filesDir/fuyubot-plugins`，也是 options 里的 `plugin_dir`。 */
+    /** 用户插件目录名：放在应用专属外置存储根目录下。 */
     const val PLUGIN_DIR_NAME = "fuyubot-plugins"
 
-    /** TDLib 数据目录名：新布局放在 `filesDir/fuyubot-data`，也是 options 里的 `data_dir`。 */
+    /** TDLib 数据目录名：放在应用专属外置存储根目录下。 */
     const val DATA_DIR_NAME = "fuyubot-data"
 
-    /** 日志目录名：`filesDir/logs`。 */
+    /** 日志目录名：`<外置 files>/logs`。 */
     private const val LOG_DIR = "logs"
+
+    /** 内核实际加载的私有插件副本目录，避免从外置存储 `dlopen`。 */
+    private const val RUNTIME_PLUGIN_DIR = "fuyubot-runtime-plugins"
+
+    /** 交给内核的私有 root 入口，指向用户可访问的外置存储目录。 */
+    private const val RUNTIME_ROOT_DIR = "fuyubot-runtime"
 
     /** 资产里插件所在子目录（`assets/fuyubot-kernel/plugins/`）。 */
     private const val ASSET_PLUGIN_DIR = "plugins"
@@ -62,9 +73,10 @@ object KernelManager {
     /**
      * 内核运行期用到的目录。
      *
-     * - [root]：交给内核的 `root`，必须是 `filesDir`——TDLib 只能写 app 私有目录，
-     *   且 `plugin_dir` / `data_dir` 都是相对它的路径；
-     * - [libDir]：内核 `.so` 的安装目录，升级时会被清空，所以数据不能放在里面。
+     * - [root]：应用专属外置存储根目录，TDLib 数据、日志和配置文件都放在这里；
+     * - [pluginDir]：内核实际加载的私有插件副本，启动前从用户插件目录同步；
+     * - [dataDir]：TDLib 数据库目录；
+     * - [libDir]：内核 `.so` 的私有安装目录，升级时会被清空。
      */
     data class KernelPaths(
         val root: String,
@@ -75,19 +87,37 @@ object KernelManager {
 
     fun kernelDir(context: Context): File = File(context.filesDir, KERNEL_DIR)
 
+    /**
+     * 用户可访问的存储根目录。
+     *
+     * 优先使用 `getExternalFilesDir(null)`，即
+     * `/storage/emulated/0/Android/data/<包名>/files`；外置存储不可用时退回
+     * 应用私有 `filesDir`，保证内核仍能启动。
+     */
+    fun storageDir(context: Context): File =
+        context.getExternalFilesDir(null) ?: context.filesDir
+
+    /** 内核使用的私有 root 路径；外置存储不可用时退回私有 `filesDir`。 */
+    private fun runtimeRoot(context: Context): File =
+        if (context.getExternalFilesDir(null) == null) {
+            context.filesDir
+        } else {
+            File(context.filesDir, RUNTIME_ROOT_DIR)
+        }
+
     /** 当前布局的目录集合；见 [KernelPaths]。 */
     fun paths(context: Context): KernelPaths {
-        val filesDir = context.filesDir
+        val storageDir = storageDir(context)
         return KernelPaths(
-            root = filesDir.absolutePath,
-            pluginDir = File(filesDir, PLUGIN_DIR_NAME).absolutePath,
-            dataDir = File(filesDir, DATA_DIR_NAME).absolutePath,
-            libDir = File(filesDir, KERNEL_DIR).absolutePath,
+            root = runtimeRoot(context).absolutePath,
+            pluginDir = runtimePluginDir(context).absolutePath,
+            dataDir = File(storageDir, DATA_DIR_NAME).absolutePath,
+            libDir = File(context.filesDir, KERNEL_DIR).absolutePath,
         )
     }
 
-    /** 内核日志目录（`filesDir/logs`），同样在内核安装目录之外。 */
-    fun logDir(context: Context): File = File(context.filesDir, LOG_DIR)
+    /** 内核日志目录（`Android/data/<包名>/files/logs`）。 */
+    fun logDir(context: Context): File = File(storageDir(context), LOG_DIR)
 
     fun isInstalled(context: Context): Boolean =
         File(kernelDir(context), MAIN_LIBRARY).isFile
@@ -116,8 +146,53 @@ object KernelManager {
     fun tdlibPath(context: Context): String? =
         File(kernelDir(context), TDLIB_LIBRARY).takeIf { it.isFile }?.absolutePath
 
-    /** 插件目录（`filesDir/fuyubot-plugins`），内核未安装时也返回其预期路径。 */
-    fun pluginDir(context: Context): File = File(context.filesDir, PLUGIN_DIR_NAME)
+    /** 用户插件目录（`Android/data/<包名>/files/fuyubot-plugins`）。 */
+    fun pluginDir(context: Context): File = File(storageDir(context), PLUGIN_DIR_NAME)
+
+    /** 内核启动时实际加载的私有插件副本。 */
+    fun runtimePluginDir(context: Context): File =
+        File(context.filesDir, RUNTIME_PLUGIN_DIR)
+
+    /**
+     * 准备运行期目录，并把旧版保存在应用私有目录中的数据迁到用户可访问目录。
+     */
+    fun prepareRuntime(context: Context): Result<Unit> = runCatching {
+        val storageDir = storageDir(context)
+        require(storageDir.isDirectory || storageDir.mkdirs()) {
+            "无法创建存储目录：${storageDir.absolutePath}"
+        }
+        if (context.getExternalFilesDir(null) != null) {
+            val runtimeRoot = File(context.filesDir, RUNTIME_ROOT_DIR)
+            if (Files.isSymbolicLink(runtimeRoot.toPath())) {
+                Files.delete(runtimeRoot.toPath())
+            } else if (runtimeRoot.exists()) {
+                runtimeRoot.deleteRecursively()
+            }
+            Files.createSymbolicLink(runtimeRoot.toPath(), storageDir.toPath())
+        }
+        migrateLegacyLayout(context)
+    }
+
+    /**
+     * 把用户插件目录同步到内核可加载的私有副本。
+     *
+     * 每次启动内核前整体重建，确保用户手工增删 / 替换的插件会被完整带过去；
+     * 副本按 targetSdk 34+ 的要求设为只读。
+     */
+    fun syncRuntimePlugins(context: Context): Result<Unit> = runCatching {
+        val source = pluginDir(context)
+        val target = runtimePluginDir(context)
+        if (target.exists()) target.deleteRecursively()
+        if (source.isDirectory) {
+            target.parentFile?.mkdirs()
+            source.copyRecursively(target, overwrite = true)
+            target.walkTopDown()
+                .filter { it.isFile }
+                .forEach { it.setReadOnly() }
+        } else {
+            target.mkdirs()
+        }
+    }
 
     /**
      * 已安装的本地插件数量：旧形态的 `.so`（含 `.so.disable`）+ 目录包
@@ -143,7 +218,7 @@ object KernelManager {
     }
 
     /**
-     * 把旧版布局（数据 / 日志 / 插件都在内核安装目录里）一次性搬到新位置。
+     * 把旧版布局（数据 / 日志 / 插件在内核安装目录或应用私有目录）搬到外置目录。
      *
      * 旧版内核把 TDLib 数据库放在 `<kernelDir>/data`、日志放在 `<kernelDir>/logs`、
      * 插件放在 `<kernelDir>/plugins`；而 [ensureCurrent] 升级内核时会清空整个安装目录，
@@ -155,18 +230,23 @@ object KernelManager {
      */
     fun migrateLegacyLayout(context: Context) {
         val legacyRoot = kernelDir(context)
-        if (!legacyRoot.isDirectory) return
         val paths = paths(context)
         runCatching {
-            moveDirectoryIfAbsent(File(legacyRoot, LEGACY_DATA_DIR), File(paths.dataDir))
-            moveDirectoryIfAbsent(File(legacyRoot, LOG_DIR), logDir(context))
-            mergeDirectory(File(legacyRoot, LEGACY_PLUGIN_DIR), File(paths.pluginDir))
+            if (legacyRoot.isDirectory) {
+                moveDirectoryIfAbsent(File(legacyRoot, LEGACY_DATA_DIR), File(paths.dataDir))
+                moveDirectoryIfAbsent(File(legacyRoot, LOG_DIR), logDir(context))
+                mergeDirectory(File(legacyRoot, LEGACY_PLUGIN_DIR), pluginDir(context))
+            }
+            moveDirectoryIfAbsent(File(context.filesDir, DATA_DIR_NAME), File(paths.dataDir))
+            moveDirectoryIfAbsent(File(context.filesDir, LOG_DIR), logDir(context))
+            mergeDirectory(File(context.filesDir, PLUGIN_DIR_NAME), pluginDir(context))
         }
     }
 
     /** 移动目录；目标已存在时保持原状（说明新布局已经有数据，旧数据不再搬）。 */
     private fun moveDirectoryIfAbsent(source: File, target: File) {
         if (!source.isDirectory || target.exists()) return
+        if (source.absoluteFile == target.absoluteFile) return
         target.parentFile?.mkdirs()
         if (!source.renameTo(target)) {
             source.copyRecursively(target, overwrite = false)
@@ -176,7 +256,7 @@ object KernelManager {
 
     /** 把旧插件目录合并进新插件目录：同名文件 / 目录保留目标已有的，不覆盖。 */
     private fun mergeDirectory(source: File, target: File) {
-        if (!source.isDirectory) return
+        if (!source.isDirectory || source.absoluteFile == target.absoluteFile) return
         target.mkdirs()
         source.listFiles().orEmpty().forEach { child ->
             val dest = File(target, child.name)
@@ -291,7 +371,7 @@ object KernelManager {
      * 把资产里的内置插件复制到插件目录。
      *
      * 同名文件已存在时**不覆盖**——那通常是用户从插件仓库装的更新版本，冲掉会丢用户的选择。
-     * 新落盘的插件按上游要求设为只读（targetSdk 34+ 下可执行代码不应可写）。
+     * 外置目录保持可写，启动前同步到私有副本时再统一设为只读。
      */
     private fun installPackagedPlugins(source: File, target: File) {
         if (!source.isDirectory) return
@@ -300,7 +380,6 @@ object KernelManager {
             val dest = File(target, file.name)
             if (dest.exists()) return@forEach
             file.copyTo(dest, overwrite = false)
-            dest.setReadOnly()
         }
     }
 

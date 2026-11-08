@@ -2,14 +2,16 @@ package com.CatMoeCircle.fuyutd.data.update
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * 直接读取 GitHub Release 的 `releases/latest` 接口。
+ * 读取 GitHub Release 列表，并从中筛选正式 App 版本。
  *
- * 解析刻意做得宽容：字段缺失只当作空值，避免仓库改格式后整页报错。
+ * 仓库同时包含 App、TDLib 等 Release，不能直接使用 `releases/latest`。这里只接受
+ * 非草稿、非预发布、带 APK 资产，且 tag 不是 TDLib 版本的最新语义版本。
  */
 class UpdateRepository {
 
@@ -37,7 +39,24 @@ class UpdateRepository {
     }
 
     private fun parse(body: String): ReleaseInfo {
-        val json = JSONObject(body)
+        val releases = JSONArray(body)
+        val candidates = buildList {
+            for (index in 0 until releases.length()) {
+                val json = releases.optJSONObject(index) ?: continue
+                if (json.optBoolean("draft") || json.optBoolean("prerelease")) continue
+
+                val release = parseRelease(json)
+                if (release.tagName.startsWith("TDLib-", ignoreCase = true)) continue
+                if (release.assets.none { it.name.endsWith(".apk", ignoreCase = true) }) continue
+                add(release)
+            }
+        }
+        return candidates.maxWithOrNull { left, right ->
+            compareVersion(left.versionName, right.versionName)
+        } ?: error("Release 列表中没有包含 APK 的正式 App 版本")
+    }
+
+    private fun parseRelease(json: JSONObject): ReleaseInfo {
         val tagName = json.optString("tag_name")
         val assetsJson = json.optJSONArray("assets")
         val assets = buildList {

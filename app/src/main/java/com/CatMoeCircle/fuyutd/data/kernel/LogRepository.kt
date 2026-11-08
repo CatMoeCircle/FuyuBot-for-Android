@@ -56,7 +56,7 @@ data class LogEntry(
 }
 
 /**
- * 读取内核写在 `filesDir/logs/fuyubot.log` 的运行日志。
+ * 读取内核写在 `Android/data/<包名>/files/logs/fuyubot.log` 的运行日志。
  *
  * 日志目录固定在内核安装目录之外（见 [KernelManager.paths]），内核升级不会清掉它。
  * 内核用 tracing-subscriber 追加写该文件，应用进程无法收到回调，

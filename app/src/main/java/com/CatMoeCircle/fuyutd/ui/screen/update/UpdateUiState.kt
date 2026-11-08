@@ -20,6 +20,8 @@ data class UpdateChannelState(
     /** 已安装的版本号。 */
     val currentVersion: String = "",
     val latest: ReleaseInfo? = null,
+    /** 按当前设备 ABI 从 Release 资产中选出的推荐 APK 文件名。 */
+    val recommendedApkName: String? = null,
     val error: String? = null,
 ) {
 
@@ -35,6 +37,7 @@ data class UpdatePromptEntry(
     val channel: UpdateChannel,
     val latest: ReleaseInfo,
     val currentVersion: String,
+    val recommendedApkName: String?,
 )
 
 /**
@@ -60,7 +63,7 @@ data class UpdateUiState(
 @Immutable
 data class UpdateScreenActions(
     val onBack: () -> Unit,
-    val onCheckApp: () -> Unit,
+    val onAppAction: () -> Unit,
     val onSetAutoCheck: (Boolean) -> Unit,
     val onOpenUrl: (String) -> Unit,
 )

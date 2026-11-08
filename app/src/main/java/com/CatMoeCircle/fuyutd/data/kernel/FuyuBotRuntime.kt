@@ -371,12 +371,15 @@ class FuyuBotRuntime(
     suspend fun start(context: android.content.Context): Result<Int> =
         withContext(Dispatchers.IO) {
             runCatching {
-                // root / plugin_dir / data_dir / lib_dir 走新布局：数据、日志、插件都在
-                // 内核安装目录之外，升级内核不会丢登录态与用户插件。
+                // 数据、日志和用户插件放在应用专属外置目录；内核只从私有只读副本加载插件。
+                KernelManager.prepareRuntime(context).getOrThrow()
                 val options = config.buildOptionsJson(KernelManager.paths(context))
                     ?: error("缺少 api_id / api_hash")
                 ensureLoaded(context).getOrThrow()
                 val handle = native!!
+                if (!handle.nativeIsRunning()) {
+                    KernelManager.syncRuntimePlugins(context).getOrThrow()
+                }
                 val code = handle.nativeStart(options)
                 // 返回码只说「线程起来没有」；真正的原因在内核的 last_error 里，
                 // 且它是线程局部的，必须就地读。BUSY 按成功处理：内核 start 是幂等的。

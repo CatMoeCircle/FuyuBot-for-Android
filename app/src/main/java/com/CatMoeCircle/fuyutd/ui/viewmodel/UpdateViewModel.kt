@@ -1,6 +1,7 @@
 package com.CatMoeCircle.fuyutd.ui.viewmodel
 
 import android.content.Context
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.CatMoeCircle.fuyutd.data.SettingsRepository
@@ -36,6 +37,7 @@ class UpdateViewModel(
     val uiState: StateFlow<UpdateUiState> = _uiState.asStateFlow()
 
     private var appVersionLoaded = false
+    private var supportedAbis: List<String> = emptyList()
     private var lastAutoCheckAt = 0L
     private var checkJob: Job? = null
     private val promptedChannels = mutableSetOf<UpdateChannel>()
@@ -47,6 +49,7 @@ class UpdateViewModel(
         val versionName = runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull().orEmpty().removePrefix("v")
+        supportedAbis = Build.SUPPORTED_ABIS.toList()
         _uiState.update { it.copy(app = it.app.copy(currentVersion = versionName)) }
     }
 
@@ -95,6 +98,7 @@ class UpdateViewModel(
                         val updatedState = current.stateOf(channel).copy(
                             status = UpdateCheckStatus.Success,
                             latest = release,
+                            recommendedApkName = release.apkAssetForAbis(supportedAbis)?.name,
                             error = null,
                         )
                         val updated = current.copy(app = updatedState)
@@ -108,6 +112,7 @@ class UpdateViewModel(
                                     channel = channel,
                                     latest = release,
                                     currentVersion = updatedState.currentVersion,
+                                    recommendedApkName = updatedState.recommendedApkName,
                                 )
                             )
                         } else {

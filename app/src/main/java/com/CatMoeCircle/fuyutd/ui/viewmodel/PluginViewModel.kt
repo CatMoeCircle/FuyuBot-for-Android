@@ -307,7 +307,7 @@ class PluginViewModel(
     /** 撤销「待卸载」：把插件挪回启用位置；内核运行中若已不再加载它，需要重启才生效。 */
     fun undoUninstall(installed: InstalledPlugin) {
         val context = appContext ?: return
-        val pluginDirPath = KernelManager.pluginDir(context).absolutePath
+        val pluginDirPath = KernelManager.runtimePluginDir(context).absolutePath
         // 卸载时插件已被挪走；如果内核报告里还有它，说明当前会话仍加载着它，撤销不需要重启。
         val stillLoaded = kernelReport?.plugins
             ?.any { it.matches(pluginDirPath, installed) } == true
@@ -380,7 +380,7 @@ class PluginViewModel(
         // 用索引回填名称/简介（系统插件索引里没有，界面回退显示 id）。
         // 同时把内核报告里的条目按文件名 / 路径前缀匹配上来，供界面叠加真实状态。
         val kernelPlugins = kernelReport?.plugins.orEmpty()
-        val pluginDirPath = KernelManager.pluginDir(context).absolutePath
+        val pluginDirPath = KernelManager.runtimePluginDir(context).absolutePath
         val matchedKernel = mutableSetOf<KernelPluginInfo>()
         val stagedId = state.uninstallPending?.id
         val installedItems = PluginStore.installedIncludingSystem(context).map { registered ->

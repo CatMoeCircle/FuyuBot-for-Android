@@ -18,6 +18,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 内核保活前台服务。
@@ -28,6 +29,7 @@ import kotlinx.coroutines.launch
  * 生命周期：
  * - 内核启动成功后由 [FuyuBotRuntime.start] 调 [start] 拉起；
  * - 通知上的「停止」走 [ACTION_STOP]；
+ * - `nativeStop` 超时或失败时继续持有前台服务和唤醒锁，等内核真正结束；
  * - 运行时报告 [FuyuBotState.STOPPED] / [FuyuBotState.ERROR] 时撤销通知并 [stopSelf]，
  *   不会出现「内核已停、通知还在」。
  *
@@ -41,7 +43,9 @@ class KernelService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var stateJob: Job? = null
+    private var stopJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var stopTimedOut = false
 
     override fun onCreate() {
         super.onCreate()
@@ -51,13 +55,10 @@ class KernelService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            // 通知上的「停止」：nativeStop 最多阻塞 8 秒，放 IO 线程做。
-            scope.launch(Dispatchers.IO) {
-                runtime.stop()
-                stopSelfAndForeground()
-            }
+            requestStop()
             return START_NOT_STICKY
         }
+        stopTimedOut = false
         startForeground(NOTIFICATION_ID, buildNotification(runtime.state.value))
         observeRuntimeState()
         return START_NOT_STICKY
@@ -96,6 +97,33 @@ class KernelService : Service() {
         }
     }
 
+    /**
+     * 请求停止内核。
+     *
+     * `nativeStop` 最多阻塞 8 秒，因此放到 IO 线程执行。返回失败时不能立刻结束前台服务：
+     * 内核可能仍在关闭 TDLib 或刷盘，需要继续持有唤醒锁，直到运行状态真正停止。
+     */
+    private fun requestStop() {
+        if (stopJob?.isActive == true) return
+        stopTimedOut = false
+        stopJob = scope.launch(Dispatchers.IO) {
+            val result = runtime.stop()
+            withContext(Dispatchers.Main.immediate) {
+                if (!runtime.isRunning) {
+                    stopSelfAndForeground()
+                    return@withContext
+                }
+
+                // stop 返回成功但仍显示运行中时继续等 onState；真正失败则保留服务并提示收尾超时。
+                stopTimedOut = result.isFailure
+                notificationManager().notify(
+                    NOTIFICATION_ID,
+                    buildNotification(runtime.state.value),
+                )
+            }
+        }
+    }
+
     private fun stopSelfAndForeground() {
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -105,7 +133,11 @@ class KernelService : Service() {
         val status = when (state.state) {
             FuyuBotState.STARTING -> getString(R.string.kernel_service_status_starting)
             FuyuBotState.READY -> getString(R.string.kernel_service_status_running)
-            FuyuBotState.STOPPING -> getString(R.string.kernel_service_status_stopping)
+            FuyuBotState.STOPPING -> if (stopTimedOut) {
+                getString(R.string.kernel_service_status_stop_timeout)
+            } else {
+                getString(R.string.kernel_service_status_stopping)
+            }
             FuyuBotState.STOPPED, FuyuBotState.ERROR ->
                 getString(R.string.kernel_service_status_stopped)
         }

@@ -33,10 +33,9 @@ class FuyuBotConfigRepository {
     /**
      * 组装 options JSON 交给 `nativeStart`；缺少必要字段返回 null。
      *
-     * [paths] 用 [KernelManager.paths] 的返回值：`root` 是 `filesDir`，
-     * `plugin_dir` / `data_dir` 按相对 root 的目录名传（内核自己拼），
-     * `lib_dir` 传内核 `.so` 所在目录的绝对路径。这样内核升级清空安装目录时
-     * 不会连带清掉登录态、日志和用户插件。
+     * [paths] 用 [KernelManager.paths] 的返回值：`root` / `data_dir` 位于应用专属
+     * 外置存储，`plugin_dir` 指向启动前同步的私有只读插件副本，`lib_dir` 指向
+     * 私有内核安装目录。这样用户可以直接调整数据与插件，内核升级也不会清掉它们。
      */
     fun buildOptionsJson(paths: KernelManager.KernelPaths): String? {
         if (!isAuthorized) return null

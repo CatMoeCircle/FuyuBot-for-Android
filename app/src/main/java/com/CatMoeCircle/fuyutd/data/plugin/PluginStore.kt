@@ -60,7 +60,8 @@ data class InstalledPlugin(
 /**
  * 已安装插件的本地注册表。
  *
- * 内核实际加载的是 `filesDir/fuyubot-plugins/` 下的 `.so` 文件（见 [KernelManager]）。
+ * 用户插件放在 `Android/data/<包名>/files/fuyubot-plugins/`（见 [KernelManager]），
+ * 内核启动前会同步到私有只读副本再加载。
  * 内核只报插件名（点分服务名），并不报「这是商城里的哪个插件」，所以这里用一份注册表
  * 把「商城插件 id / 版本 / 落盘文件名」对应起来，供插件页展示安装状态与卸载。
  *
@@ -479,8 +480,6 @@ object PluginInstaller {
                     }
                 }
                 require(File(target, safeEntry).isFile) { "插件包缺少 entry：$safeEntry" }
-                // 内核要求插件代码只读（targetSdk 34+），和内置插件的处理保持一致。
-                markReadOnly(target)
                 onProgress(100)
 
                 val installed = InstalledPlugin(
@@ -649,11 +648,6 @@ object PluginInstaller {
             "插件包中存在非法路径：$path"
         }
         return normalized
-    }
-
-    /** 插件代码按内核要求设为只读（targetSdk 34+）；失败不影响安装结果。 */
-    private fun markReadOnly(dir: File) {
-        dir.walkTopDown().filter { it.isFile }.forEach { it.setReadOnly() }
     }
 
     private fun sha256(file: File): String {

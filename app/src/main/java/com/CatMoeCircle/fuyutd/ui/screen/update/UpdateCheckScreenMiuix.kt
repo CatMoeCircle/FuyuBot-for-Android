@@ -118,7 +118,7 @@ fun UpdateCheckScreenMiuix(
                     UpdateChannelCardMiuix(
                         icon = Icons.Rounded.SystemUpdate,
                         state = uiState.app,
-                        onAction = actions.onCheckApp,
+                        onAction = actions.onAppAction,
                     )
 
                     Spacer(Modifier.height(24.dp))

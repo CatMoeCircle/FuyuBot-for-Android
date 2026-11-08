@@ -25,18 +25,29 @@ fun UpdateCheckScreen() {
         viewModel.bind(context)
     }
 
+    val openUrl: (String) -> Unit = { url ->
+        runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+
     val actions = UpdateScreenActions(
         onBack = { navigator.pop() },
-        onCheckApp = { viewModel.check(UpdateChannel.App) },
-        onSetAutoCheck = viewModel::setAutoCheck,
-        onOpenUrl = { url ->
-            runCatching {
-                context.startActivity(
-                    Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
+        onAppAction = {
+            val app = viewModel.uiState.value.app
+            if (app.hasUpdate) {
+                app.latest?.htmlUrl
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(openUrl)
+            } else {
+                viewModel.check(UpdateChannel.App)
             }
         },
+        onSetAutoCheck = viewModel::setAutoCheck,
+        onOpenUrl = openUrl,
     )
 
     when (LocalUiMode.current) {

@@ -21,6 +21,12 @@ fun channelStatusText(state: UpdateChannelState): String = when {
         ?.let { stringResource(R.string.update_check_failed, it) }
         ?: stringResource(R.string.update_never_checked)
 
+    state.hasUpdate && state.recommendedApkName != null -> stringResource(
+        R.string.update_current_version_with_asset,
+        state.currentVersion,
+        state.recommendedApkName,
+    )
+
     else -> stringResource(R.string.update_current_version, state.currentVersion)
 }
 

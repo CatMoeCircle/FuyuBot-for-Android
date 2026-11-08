@@ -28,7 +28,7 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
 /**
  * 自动检查发现新版本后的提示弹窗。三条出路：立即去更新、今天不再提醒、稍后再说。
  *
- * 多条通道同时有新版时合并成一条消息，下载按钮优先跳内核所在的 Release。
+ * App 和内核按同一个 Release 发布；确认后统一打开 Release 页面，由用户自行下载 APK。
  */
 @Composable
 fun UpdatePromptDialog(
@@ -55,12 +55,15 @@ fun UpdatePromptDialog(
                     item.currentVersion,
                 )
             )
+            item.recommendedApkName?.let { apkName ->
+                append('\n')
+                append(stringResource(R.string.update_recommended_asset, apkName))
+            }
         }
     }
-    val downloadUrl = entry.latest.downloadUrlFor(".apk")
     val confirm = {
         onDismiss()
-        onOpenUrl(downloadUrl)
+        onOpenUrl(entry.latest.htmlUrl)
     }
 
     when (LocalUiMode.current) {

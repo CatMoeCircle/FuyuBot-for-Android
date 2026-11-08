@@ -49,12 +49,14 @@ unzip -l app/build/outputs/apk/release/*.apk | grep assets/fuyubot-kernel
 - **双风格 UI**：`UiMode` 一键切换 Miuix 与 Material 3；主题色、动态取色、模糊、浮动底栏、
   预测性返回、页面缩放均可单独配置。
 - **首页控制台**：启动 / 停止 / 重启内核，展示运行时长、TDLib 授权状态与已加载插件数。
-- **实时日志**：读取内核写在 `<root>/logs/fuyubot.log` 的日志，支持搜索、级别过滤、清空。
+- **实时日志**：读取内核写在 `Android/data/<包名>/files/logs/fuyubot.log` 的日志，
+  支持搜索、级别过滤、清空。
 - **插件管理**：从 [插件商城索引](https://catmoecircle.github.io/FuyuBot-plugins/index.json)
-  安装 / 启停 / 卸载插件，内核运行中改动会在重启后生效。
+  安装 / 启停 / 卸载插件，也可以直接在 `Android/data/<包名>/files/fuyubot-plugins/`
+  中手动调整；内核运行中改动会在重启后生效。
 - **内置内核自动安装**：内核随 APK 打包，首次启动自动释放到 `filesDir/fuyubot-kernel/`；
-  App 升级内核版本后会在下次启动自动重装，无需手动清数据。
-- **应用内更新检查**：读取 GitHub Release 判断新版本，支持「今天不再提醒」。
+  App 更新后会检查内置内核版本并自动重装，无需单独更新内核或手动清数据。
+- **应用内更新检查**：读取 GitHub Release 判断新版本，并打开 Release 页面供用户下载配套 APK。
 
 ---
 
@@ -79,6 +81,9 @@ unzip -l app/build/outputs/apk/release/*.apk | grep assets/fuyubot-kernel
 - 内核**不是**可执行文件，也不走 `jniLibs`：Android 10+ 禁止执行应用私有目录下的二进制，
   但允许 `System.load()` 加载同目录的 `.so`。因此内核放在 `assets/`，启动时整体复制到
   `filesDir/fuyubot-kernel/` 再加载，不需要 root，也不需要额外权限（仅 `INTERNET`）。
+- 除内核本体外，TDLib 数据、日志和用户插件都放在应用专属外置存储
+  `Android/data/<包名>/files/`，用户可直接查看和调整。外置插件在每次启动内核前同步到
+  `filesDir/fuyubot-runtime-plugins/` 的私有只读副本，避免从外置存储直接 `dlopen`。
 - JNI 绑定是**运行期**的：内核在 `JNI_OnLoad` 中用 `RegisterNatives` 按类名 / 方法名绑定
   `com.catmoecircle.fuyubot.runtime.Native`。因此该绑定类**必须**被 R8 保留
   （见 `app/proguard-rules.pro`），否则第一次调用就会抛 `UnsatisfiedLinkError`。
@@ -92,8 +97,8 @@ unzip -l app/build/outputs/apk/release/*.apk | grep assets/fuyubot-kernel
 | 项 | 值 |
 | --- | --- |
 | 上游仓库 | <https://github.com/CatMoeCircle/Fuyu-Bot> |
-| 内置内核版本 | `0.1.2`（见 `data/update/UpdateChannel.kt` 的 `CURRENT_KERNEL_VERSION`） |
-| JNI ABI | `3`（运行时校验，见 `Native.ABI_VERSION`） |
+| 内置内核版本 | 与 App 使用同一个 Release tag；正式构建时写入 `CURRENT_KERNEL_VERSION` |
+| JNI ABI | `1`（运行时校验，见 `Native.ABI_VERSION`） |
 | TDLib | `1.8.69`（commit `0e88653dcbf4e44c73cb655a05b58cd749a91169`） |
 | 目标 ABI | `arm64-v8a`（真机）/ `x86_64`（模拟器） |
 
@@ -343,20 +348,27 @@ unzip -l app/build/outputs/apk/release/*.apk \
    扫码登录（其它设备确认）当前版本只展示链接、不支持在本机确认。
 4. 登录状态由 TDLib 自己落盘，下次启动直接恢复，无需重复登录。
 
-内核运行日志位于 App 私有目录 `filesDir/fuyubot-kernel/logs/fuyubot.log`，
-应用内的「日志」页读的就是它。
+运行期可调目录位于 `Android/data/com.CatMoeCircle.fuyutd/files/`：
+
+- `fuyubot-data/`：TDLib 数据库与登录态；
+- `fuyubot-plugins/`：用户插件目录，支持平铺 `.so`、`.so.disable` 和目录包；
+- `logs/`：内核日志，应用内「日志」页读取 `logs/fuyubot.log`；
+- `fuyubot.toml` / `plugin-config/`：内核与插件的配置文件（存在时使用）。
+
+内核本体仍单独保存在 `filesDir/fuyubot-kernel/`；旧版本保存在应用私有目录里的
+数据、日志和插件会在首次启动新版时迁到上述外置目录。
 
 ---
 
-## 升级内置内核
+## 版本与发布
 
-1. 用新版本的内核包整体替换 `app/src/main/assets/fuyubot-kernel/` 下的文件；
-2. 同步修改 `data/update/UpdateChannel.kt` 中的 `CURRENT_KERNEL_VERSION`
-   （以及需要时的 `Native.ABI_VERSION` 与 `proguard-rules.pro`）；
-3. 重新构建 APK。
+App 和内核按同一个 Release tag 绑定发布。正式构建时，上游发布流程会把新内核铺进
+`app/src/main/assets/fuyubot-kernel/`，并将 `CURRENT_KERNEL_VERSION` 与 App 的
+`versionName` 一起改写成该 tag，再构建和签名 APK。
 
-App 启动时会比较已安装版本与 `CURRENT_KERNEL_VERSION`：版本落后则自动重装内核，
-版本一致则跳过。开发调试时若改了内核但版本号没变，需要清除 App 数据或重装应用才会重装内核。
+用户只需要下载新版 APK 覆盖安装。App 启动时会比较已安装内核标记与
+`CURRENT_KERNEL_VERSION`；新 APK 内置的内核版本变化后会自动重装，版本一致则跳过。
+开发调试时若改了内核但版本号没变，需要清除 App 数据或重装应用才会重装内核。
 
 ---
 
@@ -376,7 +388,8 @@ ABI 是否与设备一致；Release 包是否保留了 `Native` 绑定类（见 
 
 **Q：插件装上后没有生效？**
 插件在内核启动时加载。运行中安装 / 启停插件后需要重启内核；停用插件是把文件名改成
-`<id>.so.disable`，内核按 `.so` 后缀扫描时自然跳过。
+`<id>.so.disable`，内核按 `.so` 后缀扫描时自然跳过。手动放进
+`Android/data/<包名>/files/fuyubot-plugins/` 的插件也会在下次启动时同步并加载。
 
 **Q：能同时支持 `arm64-v8a` 和 `x86_64` 吗？**
 可以出两个 APK，或在构建前替换 `assets/fuyubot-kernel/` 的内容；
@@ -384,7 +397,8 @@ ABI 是否与设备一致；Release 包是否保留了 `Native` 绑定类（见 
 
 **Q：为什么不把内核放进 `jniLibs/`？**
 本项目把内核当作**可替换的数据**：内置在 assets 里、启动时复制到 `filesDir`，
-这样升级内核不需要重新发包，也避免 `jniLibs` 与 `extractNativeLibs` 的平台差异。
+这样 App 与内核可以按同一个 Release 绑定发布，也避免 `jniLibs` 与
+`extractNativeLibs` 的平台差异。
 详见 `KernelManager` 的注释。
 
 ---
