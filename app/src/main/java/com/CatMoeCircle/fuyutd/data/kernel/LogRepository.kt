@@ -66,6 +66,9 @@ object LogRepository {
 
     private const val LOG_FILE = "fuyubot.log"
 
+    private const val RUNTIME_DIR = ".fuyubot"
+    private const val RUNTIME_LEVEL_FILE = "log-level"
+
     /** 只读文件尾部这么多字节，避免日志变长后一次读爆内存。 */
     private const val MAX_READ_BYTES = 256 * 1024
 
@@ -73,6 +76,30 @@ object LogRepository {
     private const val MAX_ENTRIES = 2000
 
     fun logFile(context: Context): File = File(KernelManager.logDir(context), LOG_FILE)
+
+    /**
+     * 运行期插件日志级别文件：`<root>/.fuyubot/log-level`。
+     *
+     * 内核每 500ms 看一次，改完不用重启；只控制插件日志，不影响宿主与 TDLib。
+     * 这里直接写用户可访问的存储根目录，和内核经 `root` 符号链接看到的是同一个文件。
+     */
+    fun runtimeLevelFile(context: Context): File =
+        File(KernelManager.storageDir(context), "$RUNTIME_DIR/$RUNTIME_LEVEL_FILE")
+
+    /** 读当前运行期级别；文件不存在或内容不可识别返回 null。 */
+    fun readRuntimeLevel(context: Context): LogLevel? = runCatching {
+        val file = runtimeLevelFile(context)
+        if (!file.isFile) return@runCatching null
+        LogLevel.parse(file.readText().trim()).takeIf { it != LogLevel.UNKNOWN }
+    }.getOrNull()
+
+    /** 写运行期级别；下一轮 500ms 内生效。 */
+    fun writeRuntimeLevel(context: Context, level: LogLevel): Result<Unit> = runCatching {
+        require(level != LogLevel.UNKNOWN) { "未知日志级别" }
+        val file = runtimeLevelFile(context)
+        file.parentFile?.mkdirs()
+        file.writeText(level.name.lowercase() + "\n")
+    }
 
     /** 读取并解析日志；文件不存在时返回空列表。 */
     fun read(context: Context): List<LogEntry> {

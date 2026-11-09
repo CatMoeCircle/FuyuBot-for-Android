@@ -223,6 +223,10 @@ private fun RepoListMiuix(
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         when {
+            uiState.storeDisabled -> {
+                PluginCenterHint(stringResource(R.string.plugin_store_disabled))
+            }
+
             uiState.loadStatus == PluginLoadStatus.Loading && uiState.repoItems.isEmpty() -> {
                 PluginCenterHint(stringResource(R.string.plugin_loading))
             }

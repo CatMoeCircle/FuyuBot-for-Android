@@ -14,7 +14,7 @@ import java.io.File
  * Fuyu-Bot 的官方 TOML 配置。
  *
  * 文件固定为 `Android/data/<包名>/files/fuyubot.toml`，字段结构与桌面版一致。
- * `[plugin.*]` 由内核直接读取；账号、插件日志和 TDLib 选项由这里解析后组装成 JNI options。
+ * 内核把它当作主配置直接读取；这里只解析本次运行需要覆盖的几项，组装成 JNI options 覆盖层。
  */
 class FuyuBotConfigRepository(context: Context) {
 
@@ -91,6 +91,10 @@ class FuyuBotConfigRepository(context: Context) {
     /**
      * 解析 TOML 并组装 `nativeStart` 的 options JSON。
      *
+     * 内核以 `fuyubot.toml` 为主配置，这里只放本次运行的覆盖项：
+     * `root` / `data_dir` / `plugin_dir` / `log_level` / `lib_dir`，以及不落盘的 `bot_token`。
+     * `api_id` / `api_hash` 由内核自己从 TOML 读，这里只用来判断配置是否齐全。
+     *
      * [transientBotToken] 来自本次配置弹窗，不会写回 TOML；官方格式明确不持久化 Bot Token。
      * 如果用户手动在 TOML 里写了 `telegram.bot_token`，这里也会兼容读取。
      */
@@ -125,10 +129,7 @@ class FuyuBotConfigRepository(context: Context) {
             .put("plugin_dir", relativeTo(paths.root, paths.pluginDir))
             .put("data_dir", relativeTo(paths.root, dataDir.absolutePath))
             .put("lib_dir", libDir.absolutePath)
-            .put("api_id", id)
-            .put("api_hash", hash)
             .put("log_level", pluginLogLevel(document))
-            .put("tdlib_log_verbosity", tdlibLogVerbosity(document))
         if (botToken.isNotEmpty()) {
             options.put("bot_token", botToken)
         }
@@ -137,6 +138,17 @@ class FuyuBotConfigRepository(context: Context) {
             optionsJson = options.toString(),
             pluginDir = pluginSourceDir(document),
         )
+    }
+
+    /**
+     * 插件商城索引地址（`[plugins].registry_url`）。
+     *
+     * 旧配置没有这个键时回落到官方地址，避免升级后商城直接消失；
+     * 显式留空表示关闭商城（与内核模板的语义一致）。
+     */
+    fun pluginRegistryUrl(): String? {
+        val raw = load().getString(PLUGIN_REGISTRY_URL) ?: return DEFAULT_PLUGIN_REGISTRY_URL
+        return raw.trim().ifEmpty { null }
     }
 
     /** 用户插件目录，`[plugins].dir` 相对配置文件所在目录解析。 */
@@ -167,22 +179,24 @@ class FuyuBotConfigRepository(context: Context) {
         if (file.isFile) return file
 
         file.parentFile?.mkdirs()
-        val document = parse(defaultTemplateText())
 
         val prefs = AppPrefs.prefs()
         val legacyId = prefs.getInt(LEGACY_KEY_API_ID, 0)
         val legacyHash = prefs.getString(LEGACY_KEY_API_HASH, "").orEmpty()
         val legacyToken = prefs.getString(LEGACY_KEY_BOT_TOKEN, "").orEmpty()
         if (legacyId > 0 || legacyHash.isNotBlank()) {
+            val document = parse(defaultTemplateText())
             document.set(TELEGRAM_API_ID, legacyId.toLong())
             document.set(TELEGRAM_API_HASH, legacyHash)
             document.set(
                 TELEGRAM_ACCOUNT_TYPE,
                 if (legacyToken.isBlank()) ACCOUNT_USER else ACCOUNT_BOT,
             )
+            // 迁移旧凭据只能走解析 + 重写，注释会丢；新装用户直接落原文，保留注释。
+            writeConfig(document.toToml())
+        } else {
+            writeConfig(defaultTemplateText())
         }
-
-        writeConfig(document.toToml())
         prefs.edit {
             remove(LEGACY_KEY_API_ID)
             remove(LEGACY_KEY_API_HASH)
@@ -288,6 +302,9 @@ class FuyuBotConfigRepository(context: Context) {
         const val TELEGRAM_DATA_DIR = "telegram.data_dir"
         const val PLUGIN_DIR = "plugins.dir"
         const val PLUGIN_LOG_LEVEL = "plugins.log_level"
+        const val PLUGIN_REGISTRY_URL = "plugins.registry_url"
+        const val DEFAULT_PLUGIN_REGISTRY_URL =
+            "https://catmoecircle.github.io/FuyuBot-plugins/index.json"
         const val PLUGIN_LOG_DEFAULT = "info"
         const val TDLIB_PATH = "tdlib.path"
         const val TDLIB_LOG_VERBOSITY = "tdlib.log_verbosity"

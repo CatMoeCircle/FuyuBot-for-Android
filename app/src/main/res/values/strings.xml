@@ -14,6 +14,7 @@
     <string name="log_filter_empty">暂无日志</string>
     <string name="log_clear">清空日志</string>
     <string name="log_level_trace">全部</string>
+    <string name="log_level_trace_name">跟踪</string>
     <string name="log_level_debug">调试</string>
     <string name="log_level_info">信息</string>
     <string name="log_level_warn">警告</string>
@@ -22,6 +23,9 @@
     <string name="log_empty_hint">启动内核后，运行日志会显示在这里</string>
     <string name="log_empty_filtered">没有符合条件的日志</string>
     <string name="log_copied">已复制</string>
+    <string name="log_runtime_level_title">插件日志级别（运行期）</string>
+    <string name="log_runtime_level_saved">已写入运行期插件日志级别</string>
+    <string name="log_runtime_level_failed">写入失败：%1$s</string>
 
     <string name="home_title">仪表盘</string>
     <string name="home_status">状态</string>
@@ -236,6 +240,7 @@
     <string name="plugin_uninstall_confirm_message">删除后会删除该插件的数据目录，依赖这个插件的插件可能会加载失败</string>
     <string name="plugin_uninstall_confirm_action">确认</string>
     <string name="plugin_restart_needed">重启后生效</string>
+    <string name="plugin_store_disabled">插件商城已关闭：fuyubot.toml 中 plugins.registry_url 为空</string>
     <string name="plugin_pending_uninstall">待卸载</string>
     <string name="plugin_supported_platforms">仅支持以下平台</string>
     <string name="plugin_version">版本</string>

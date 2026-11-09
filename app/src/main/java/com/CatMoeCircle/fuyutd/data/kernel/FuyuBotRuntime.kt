@@ -365,6 +365,21 @@ class FuyuBotRuntime {
         native = instance
     }
 
+    /**
+     * 用内核模板建 / 改 `fuyubot.toml`；不要求运行时在跑，也不影响正在跑的实例。
+     *
+     * 失败时异常里带内核的 `last_error()`；旧内核没有这个方法时会抛
+     * `UnsatisfiedLinkError`，调用方据此回退到 App 自带的模板。
+     */
+    fun initConfig(json: String): Result<Int> = runCatching {
+        val handle = native ?: error("内核未加载")
+        val code = handle.nativeInitConfig(json)
+        if (code != Native.RESULT_OK) {
+            error(handle.lastErrorOrNull() ?: "nativeInitConfig 返回 $code")
+        }
+        code
+    }
+
     /** 启动运行时；返回底层返回码。 */
     suspend fun start(
         context: android.content.Context,

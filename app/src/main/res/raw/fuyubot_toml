@@ -1,4 +1,5 @@
 # Fuyu-Bot configuration shared with the desktop edition.
+# 内核以本文件为主配置；App 只通过运行期参数覆盖 data_dir / plugin_dir / log_level 等少数键。
 
 [bot]
 name = "fuyubot"
@@ -12,11 +13,21 @@ data_dir = "fuyubot-data"
 # api_hash is a credential. Do not commit this file to a public repository.
 api_hash = ""
 
+[command]
+# 命令头：单个字符的数组；不写就按账号类型取默认值（bot 认 "/"，user 认 "."）。
+# prefix = ["/", "."]
+# 允许触发命令的用户 id；bot 填了就只响应这些用户，user 账户自己发的命令始终可用。
+whitelist = []
+# user 账户的白名单模式，默认 true；关掉后任何人都能触发命令，不建议。
+whitelist_only = true
+
 [plugins]
 # Relative paths are resolved from the directory containing this file.
 dir = "fuyubot-plugins"
 # Plugin log level: error / warn / info / debug / trace.
 log_level = "info"
+# 插件商店索引；删掉这一行或留空即关闭内核侧商店。
+registry_url = "https://catmoecircle.github.io/FuyuBot-plugins/index.json"
 
 [tdlib]
 # Empty uses the tdjson bundled with the Android kernel.
@@ -24,6 +35,7 @@ path = ""
 # TDLib's own log verbosity. Use 0 for quiet, 1 for warnings and errors.
 log_verbosity = 1
 
-# Add plugin-specific sections here, for example:
+# [plugin.<插件名>] 是插件配置的最高优先级层；插件自己写的配置在
+# plugin-config/<插件名>.toml，低于本文件。
 # [plugin.fuyubot.manage]
 # reply_prefix = "Installed: "

@@ -14,8 +14,9 @@ import android.util.Log
  * 库不随 APK 打包，而是安装到 `filesDir/fuyubot-kernel/`，所以这里用
  * [System.load] 绝对路径加载，而不是 `System.loadLibrary`。
  *
- * 方法共十个：生命周期 / 问答六个，加上插件列表、插件详情、TDLib JSON 请求与本线程
- * 最后一次错误——新版内核把这一整批都记作 ABI 1（见 `include/fuyubot_jni.h`）。
+ * 方法共十三个：生命周期 / 问答六个，加上插件列表、插件详情、两个 TDLib 状态查询、
+ * TDLib JSON 请求、本线程最后一次错误，以及可选的配置初始化——新版内核把这一整批都记作
+ * ABI 1（见 `include/fuyubot_jni.h`）。
  * 内核版本可能比 APK 旧，用 [nativeVersion] 核对 [ABI_VERSION] 后再用新方法；
  * 绑定是逐个方法注册的，类里缺哪个只影响那一个。
  */
@@ -37,6 +38,14 @@ class Native(
 
     /** 运行时 ABI 版本，等于内核头文件里的 `FUYUBOT_JNI_ABI`。 */
     external fun nativeVersion(): Int
+
+    /**
+     * 建 / 改 `<root>/fuyubot.toml`（内核模板与 CLI 的 `fuyubot init` 同源）。
+     *
+     * v1 内追加的**可选**方法：旧内核没有它，调用会抛 `UnsatisfiedLinkError`，
+     * 由调用方回退。`overwrite = true` 会整份重写（丢注释与 `[plugin.*]`）。
+     */
+    external fun nativeInitConfig(json: String): Int
 
     /** 注册回调对象；参数类型在 JNI 层是 `Object`，Kotlin 声明为 [Any]。 */
     external fun nativeRegister(cb: Any): Int

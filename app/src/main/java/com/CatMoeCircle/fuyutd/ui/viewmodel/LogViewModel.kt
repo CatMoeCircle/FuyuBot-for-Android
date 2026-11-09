@@ -1,8 +1,10 @@
 package com.CatMoeCircle.fuyutd.ui.viewmodel
 
 import android.content.Context
+import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.CatMoeCircle.fuyutd.R
 import com.CatMoeCircle.fuyutd.data.kernel.LogEntry
 import com.CatMoeCircle.fuyutd.data.kernel.LogLevel
 import com.CatMoeCircle.fuyutd.data.kernel.LogRepository
@@ -35,8 +37,54 @@ class LogViewModel : ViewModel() {
 
     fun bind(context: Context) {
         appContext = context.applicationContext
+        reloadRuntimeLevel()
         reload()
         startPolling()
+    }
+
+    /** 读一次 `.fuyubot/log-level`，进入页面时同步菜单里的当前选中项。 */
+    private fun reloadRuntimeLevel() {
+        if (!::appContext.isInitialized) return
+        viewModelScope.launch {
+            val level = withContext(Dispatchers.IO) {
+                LogRepository.readRuntimeLevel(appContext)
+            }
+            _uiState.update { it.copy(pluginLogLevel = level) }
+        }
+    }
+
+    /**
+     * 写运行期插件日志级别：内核每 500ms 看一次 `.fuyubot/log-level`，不用重启。
+     *
+     * 只影响插件日志，页面上的「日志级别」过滤不变。
+     */
+    fun setRuntimeLogLevel(level: LogLevel) {
+        if (!::appContext.isInitialized) return
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                LogRepository.writeRuntimeLevel(appContext, level)
+            }
+            result.fold(
+                onSuccess = {
+                    _uiState.update { it.copy(pluginLogLevel = level) }
+                    Toast.makeText(
+                        appContext,
+                        appContext.getString(R.string.log_runtime_level_saved),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                },
+                onFailure = { error ->
+                    Toast.makeText(
+                        appContext,
+                        appContext.getString(
+                            R.string.log_runtime_level_failed,
+                            error.message ?: error.javaClass.simpleName,
+                        ),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                },
+            )
+        }
     }
 
     fun startPolling() {

@@ -17,6 +17,7 @@ import com.CatMoeCircle.fuyutd.ui.viewmodel.LogViewModel
 class LogScreenActions(
     val onQueryChange: (String) -> Unit,
     val onSetMinLevel: (LogLevel) -> Unit,
+    val onSetRuntimeLevel: (LogLevel) -> Unit,
     val onToggleModule: (String) -> Unit,
     val onClearModules: () -> Unit,
     val onClear: () -> Unit,
@@ -39,6 +40,7 @@ fun LogPage(bottomInnerPadding: Dp) {
     val actions = LogScreenActions(
         onQueryChange = viewModel::setQuery,
         onSetMinLevel = viewModel::setMinLevel,
+        onSetRuntimeLevel = viewModel::setRuntimeLogLevel,
         onToggleModule = { module ->
             val next = uiState.moduleFilter.toMutableSet()
             if (!next.add(module)) next.remove(module)

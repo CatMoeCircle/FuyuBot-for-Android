@@ -319,14 +319,21 @@ private fun LogMorePopupMiuix(
                         label = stringResource(R.string.log_level_title),
                         hasSubmenu = true,
                         index = 0,
-                        lastIndex = 1,
+                        lastIndex = 2,
                         onClick = { page = LogMorePage.Level },
+                    )
+                    MoreRow(
+                        label = stringResource(R.string.log_runtime_level_title),
+                        hasSubmenu = true,
+                        index = 1,
+                        lastIndex = 2,
+                        onClick = { page = LogMorePage.RuntimeLevel },
                     )
                     MoreRow(
                         label = stringResource(R.string.log_filter_title),
                         hasSubmenu = true,
-                        index = 1,
-                        lastIndex = 1,
+                        index = 2,
+                        lastIndex = 2,
                         onClick = { page = LogMorePage.Module },
                     )
                 }
@@ -345,6 +352,26 @@ private fun LogMorePopupMiuix(
                             isLast = index == LogLevels.lastIndex,
                             onSelectedIndexChange = {
                                 actions.onSetMinLevel(level)
+                                onDismiss()
+                            },
+                        )
+                    }
+                }
+
+                LogMorePage.RuntimeLevel -> {
+                    RuntimeLogLevels.forEachIndexed { index, level ->
+                        DropdownImpl(
+                            item = DropdownItem(
+                                text = level.runtimeLabel(),
+                                selected = level == uiState.pluginLogLevel,
+                            ),
+                            optionSize = RuntimeLogLevels.size,
+                            isSelected = level == uiState.pluginLogLevel,
+                            index = index,
+                            isFirst = index == 0,
+                            isLast = index == RuntimeLogLevels.lastIndex,
+                            onSelectedIndexChange = {
+                                actions.onSetRuntimeLevel(level)
                                 onDismiss()
                             },
                         )

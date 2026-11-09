@@ -3,6 +3,7 @@ package com.CatMoeCircle.fuyutd.ui.viewmodel
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.CatMoeCircle.fuyutd.data.FuyuBotConfigRepository
 import com.CatMoeCircle.fuyutd.data.kernel.FuyuBotRuntime
 import com.CatMoeCircle.fuyutd.data.kernel.KernelManager
 import com.CatMoeCircle.fuyutd.data.kernel.KernelPluginInfo
@@ -52,8 +53,6 @@ class PluginViewModel(
     private var kernelReport: KernelPluginReport? = null
 
     private var allPlugins: List<PluginInfo> = emptyList()
-
-    private val indexUrl = "https://catmoecircle.github.io/FuyuBot-plugins/index.json"
 
     private val activeJobs = mutableMapOf<String, Job>()
 
@@ -116,8 +115,38 @@ class PluginViewModel(
         rebuildItems()
         // 本地数据已经出来了，刷新指示器停掉；远程索引继续在后台补全，不阻塞页面。
         _uiState.update { it.copy(loading = false) }
+        // 商城地址跟 `fuyubot.toml` 的 [plugins].registry_url 走；显式留空 = 关闭商城。
+        val registry = runCatching {
+            FuyuBotConfigRepository(context).pluginRegistryUrl()
+        }
+        registry.exceptionOrNull()?.let { error ->
+            allPlugins = emptyList()
+            _uiState.update {
+                it.copy(
+                    loadStatus = PluginLoadStatus.Failed,
+                    loadError = error.message ?: error.javaClass.simpleName,
+                    storeDisabled = false,
+                    repoItems = emptyList(),
+                )
+            }
+            return
+        }
+        val registryUrl = registry.getOrNull()
+        if (registryUrl == null) {
+            allPlugins = emptyList()
+            _uiState.update {
+                it.copy(
+                    loadStatus = PluginLoadStatus.Success,
+                    loadError = null,
+                    storeDisabled = true,
+                    repoItems = emptyList(),
+                )
+            }
+            return
+        }
+        _uiState.update { it.copy(storeDisabled = false) }
         viewModelScope.launch {
-            repository.fetchIndex(indexUrl).fold(
+            repository.fetchIndex(registryUrl).fold(
                 onSuccess = { plugins ->
                     allPlugins = plugins
                     PluginStore.reconcile(context)

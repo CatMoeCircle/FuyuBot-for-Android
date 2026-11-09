@@ -57,6 +57,8 @@ data class PluginUiState(
     val loadStatus: PluginLoadStatus = PluginLoadStatus.Loading,
     /** 索引加载失败的错误；加载成功后为 null。 */
     val loadError: String? = null,
+    /** `[plugins].registry_url` 被显式留空时为 true：内核侧商城关闭，这里也不去联网。 */
+    val storeDisabled: Boolean = false,
     val query: String = "",
     /** 本地已安装插件。 */
     val installed: List<InstalledPluginItem> = emptyList(),

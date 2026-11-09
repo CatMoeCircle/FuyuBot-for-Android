@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.CatMoeCircle.fuyutd.data.FuyuBotConfigRepository
+import com.CatMoeCircle.fuyutd.data.kernel.FuyuBotRuntime
+import com.CatMoeCircle.fuyutd.data.kernel.KernelManager
 import com.CatMoeCircle.fuyutd.ui.screen.config.TomlConfigNotice
 import com.CatMoeCircle.fuyutd.ui.screen.config.TomlConfigUiState
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.FileNotFoundException
 
 /**
@@ -235,10 +238,10 @@ class TomlConfigViewModel : ViewModel() {
         if (operationJob?.isActive == true) return
         _uiState.update { it.copy(busy = true, error = null, notice = null) }
         operationJob = viewModelScope.launch {
-            val repository = FuyuBotConfigRepository(context)
             val reset = withContext(Dispatchers.IO) {
                 runCatching {
-                    repository.resetToTemplate().getOrThrow()
+                    val repository = FuyuBotConfigRepository(context)
+                    resetWithKernelOrTemplate(context, repository)
                     repository.configPath() to repository.readText()
                 }
             }
@@ -269,6 +272,38 @@ class TomlConfigViewModel : ViewModel() {
     fun markRestartApplied() {
         _uiState.update { it.copy(restartRequired = false) }
     }
+
+    /**
+     * 优先让内核按自己的模板重写配置，避免 App 自带模板和上游 schema 漂移。
+     *
+     * 旧内核没有 `nativeInitConfig`、或内核还没安装时，回退到 App 的 raw 模板。
+     */
+    private fun resetWithKernelOrTemplate(
+        context: Context,
+        repository: FuyuBotConfigRepository,
+    ) {
+        val runtime = FuyuBotRuntime.instance()
+        val viaKernel = runtime.ensureLoaded(context).mapCatching {
+            runtime.initConfig(configInitJson(context)).getOrThrow()
+        }
+        if (viaKernel.isFailure) {
+            repository.resetToTemplate().getOrThrow()
+        }
+    }
+
+    /** `nativeInitConfig` 的入参：整份重写，并保留 App 侧固定的目录布局。 */
+    private fun configInitJson(context: Context): String = JSONObject()
+        .put("root", KernelManager.storageDir(context).absolutePath)
+        .put("api_id", 0)
+        .put("api_hash", "")
+        .put("account_type", "bot")
+        .put("data_dir", KernelManager.DATA_DIR_NAME)
+        .put("plugin_dir", KernelManager.PLUGIN_DIR_NAME)
+        .put("log_level", "info")
+        .put("tdlib_log_verbosity", 1)
+        .put("tdlib_path", "")
+        .put("overwrite", true)
+        .toString()
 
     private companion object {
         const val MAX_CONFIG_CHARS = 1_000_000

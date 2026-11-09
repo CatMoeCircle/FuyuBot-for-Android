@@ -123,6 +123,12 @@ fun LogPageMaterial(
                                         onClick = { morePage = LogMorePage.Level },
                                     )
                                     DropdownMenuItem(
+                                        text = {
+                                            Text(stringResource(R.string.log_runtime_level_title))
+                                        },
+                                        onClick = { morePage = LogMorePage.RuntimeLevel },
+                                    )
+                                    DropdownMenuItem(
                                         text = { Text(stringResource(R.string.log_filter_title)) },
                                         onClick = { morePage = LogMorePage.Module },
                                     )
@@ -152,6 +158,36 @@ fun LogPageMaterial(
                                             },
                                             onClick = {
                                                 actions.onSetMinLevel(level)
+                                                showMore = false
+                                            },
+                                        )
+                                    }
+                                }
+
+                                LogMorePage.RuntimeLevel -> {
+                                    RuntimeLogLevels.forEach { level ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = level.runtimeLabel(),
+                                                    color = if (level == uiState.pluginLogLevel) {
+                                                        MaterialTheme.colorScheme.primary
+                                                    } else {
+                                                        MaterialTheme.colorScheme.onSurface
+                                                    },
+                                                )
+                                            },
+                                            trailingIcon = {
+                                                if (level == uiState.pluginLogLevel) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.Check,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                    )
+                                                }
+                                            },
+                                            onClick = {
+                                                actions.onSetRuntimeLevel(level)
                                                 showMore = false
                                             },
                                         )

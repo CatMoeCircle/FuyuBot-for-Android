@@ -21,4 +21,6 @@ data class LogUiState(
     val query: String = "",
     /** 日志文件不存在时为 true（还没启动过内核）。 */
     val fileMissing: Boolean = false,
+    /** 运行期插件日志级别（`.fuyubot/log-level`）；文件不存在 / 不可识别时为 null。 */
+    val pluginLogLevel: LogLevel? = null,
 )

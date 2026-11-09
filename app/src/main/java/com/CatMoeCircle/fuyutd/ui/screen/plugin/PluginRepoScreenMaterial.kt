@@ -207,6 +207,10 @@ private fun RepoListMaterial(
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         when {
+            uiState.storeDisabled -> {
+                PluginCenterHintMaterial(stringResource(R.string.plugin_store_disabled))
+            }
+
             uiState.loadStatus == PluginLoadStatus.Loading && uiState.repoItems.isEmpty() -> {
                 PluginCenterHintMaterial(stringResource(R.string.plugin_loading))
             }
