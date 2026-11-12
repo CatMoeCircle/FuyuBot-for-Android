@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -63,6 +64,7 @@ fun PluginRepoScreenMaterial(
     uiState: PluginUiState,
     actions: PluginScreenActions,
     onBack: () -> Unit,
+    onOpenVersions: (RepoPluginItem) -> Unit,
 ) {
     val scrollBehavior =
         TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
@@ -193,6 +195,7 @@ fun PluginRepoScreenMaterial(
                     uiState = uiState,
                     actions = actions,
                     nestedScrollConnection = scrollBehavior.nestedScrollConnection,
+                    onOpenVersions = onOpenVersions,
                 )
             }
         }
@@ -204,6 +207,7 @@ private fun RepoListMaterial(
     uiState: PluginUiState,
     actions: PluginScreenActions,
     nestedScrollConnection: NestedScrollConnection,
+    onOpenVersions: (RepoPluginItem) -> Unit,
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         when {
@@ -235,6 +239,7 @@ private fun RepoListMaterial(
                         RepoCardMaterial(
                             item = item,
                             onClick = { actions.onOpenDetail(item) },
+                            onOpenVersions = { onOpenVersions(item) },
                         )
                     }
                 }
@@ -247,8 +252,10 @@ private fun RepoListMaterial(
 private fun RepoCardMaterial(
     item: RepoPluginItem,
     onClick: () -> Unit,
+    onOpenVersions: () -> Unit,
 ) {
     val installed = item.installed
+    var showMore by remember { mutableStateOf(false) }
 
     TonalCard(
         modifier = Modifier.fillMaxWidth(),
@@ -256,21 +263,48 @@ private fun RepoCardMaterial(
     ) {
         Column(modifier = Modifier.padding(16.dp, 14.dp, 16.dp, 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = item.info.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                // 名称 + 已安装标签靠左；3 点菜单固定在最右边。
+                Row(
                     modifier = Modifier.weight(1f),
-                )
-                if (installed != null) {
-                    Spacer(Modifier.width(8.dp))
-                    TagMaterial(
-                        text = stringResource(R.string.plugin_installed),
-                        background = MaterialTheme.colorScheme.secondaryContainer,
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = item.info.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
+                    if (installed != null) {
+                        Spacer(Modifier.width(8.dp))
+                        TagMaterial(
+                            text = stringResource(R.string.plugin_installed),
+                            background = MaterialTheme.colorScheme.secondaryContainer,
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
+                // 右上角 3 点菜单：版本表按需拉，入口放在卡片上。
+                Box {
+                    IconButton(onClick = { showMore = true }) {
+                        Icon(
+                            imageVector = Icons.Rounded.MoreVert,
+                            contentDescription = stringResource(R.string.plugin_card_more),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showMore,
+                        onDismissRequest = { showMore = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.plugin_choose_version)) },
+                            onClick = {
+                                showMore = false
+                                onOpenVersions()
+                            },
+                        )
+                    }
                 }
             }
 

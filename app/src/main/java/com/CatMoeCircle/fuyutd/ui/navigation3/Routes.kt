@@ -13,4 +13,7 @@ sealed interface Route : NavKey {
     data object TomlConfig : Route
     data object UpdateCheck : Route
     data object PluginRepo : Route
+
+    /** 商城插件的「所有版本」页；[pluginId] 是索引里的插件 id。 */
+    data class PluginVersions(val pluginId: String) : Route
 }

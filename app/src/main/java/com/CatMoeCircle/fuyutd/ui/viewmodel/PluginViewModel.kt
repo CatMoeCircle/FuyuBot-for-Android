@@ -8,12 +8,16 @@ import com.CatMoeCircle.fuyutd.data.kernel.FuyuBotRuntime
 import com.CatMoeCircle.fuyutd.data.kernel.KernelManager
 import com.CatMoeCircle.fuyutd.data.kernel.KernelPluginInfo
 import com.CatMoeCircle.fuyutd.data.kernel.KernelPluginReport
+import com.CatMoeCircle.fuyutd.data.plugin.CURRENT_PLUGIN_ABI
 import com.CatMoeCircle.fuyutd.data.plugin.InstalledPlugin
 import com.CatMoeCircle.fuyutd.data.plugin.PluginInfo
 import com.CatMoeCircle.fuyutd.data.plugin.PluginInstaller
 import com.CatMoeCircle.fuyutd.data.plugin.PluginRepository
 import com.CatMoeCircle.fuyutd.data.plugin.PluginStore
-import com.CatMoeCircle.fuyutd.data.plugin.deviceAsset
+import com.CatMoeCircle.fuyutd.data.plugin.PluginVersion
+import com.CatMoeCircle.fuyutd.data.plugin.assetForDevice
+import com.CatMoeCircle.fuyutd.data.plugin.isUsable
+import com.CatMoeCircle.fuyutd.data.plugin.selectVersion
 import com.CatMoeCircle.fuyutd.data.plugin.supportsDevice
 import com.CatMoeCircle.fuyutd.ui.screen.plugin.InstalledPluginItem
 import com.CatMoeCircle.fuyutd.ui.screen.plugin.PluginLoadStatus
@@ -53,6 +57,12 @@ class PluginViewModel(
     private var kernelReport: KernelPluginReport? = null
 
     private var allPlugins: List<PluginInfo> = emptyList()
+
+    /** 当前索引地址；分片相对它解析。 */
+    private var registryUrl: String? = null
+
+    /** 已拉到的明细分片（轻索引本身没有版本表）。 */
+    private val detailCache = mutableMapOf<String, PluginInfo>()
 
     private val activeJobs = mutableMapOf<String, Job>()
 
@@ -121,6 +131,8 @@ class PluginViewModel(
         }
         registry.exceptionOrNull()?.let { error ->
             allPlugins = emptyList()
+            registryUrl = null
+            detailCache.clear()
             _uiState.update {
                 it.copy(
                     loadStatus = PluginLoadStatus.Failed,
@@ -132,6 +144,8 @@ class PluginViewModel(
             return
         }
         val registryUrl = registry.getOrNull()
+        this.registryUrl = registryUrl
+        detailCache.clear()
         if (registryUrl == null) {
             allPlugins = emptyList()
             _uiState.update {
@@ -186,12 +200,37 @@ class PluginViewModel(
         rebuildItems()
     }
 
-    /** 打开插件详情弹窗：先展示 description 保底，再异步拉取仓库 README。 */
+    /**
+     * 打开插件详情弹窗：先展示 description 保底，再异步拉取明细分片与仓库 README。
+     *
+     * 新版索引是轻索引，列表项没有描述和版本表，所以要在这里补一次分片请求；
+     * 分片回来后更新弹窗（描述 / 版本）与商城列表。
+     */
     fun openDetail(item: RepoPluginItem) {
         val fallback = item.info.description.ifBlank { item.info.summary }
         _uiState.update {
             it.copy(detailItem = item, detailMarkdown = fallback.ifBlank { null })
         }
+        ensureDetail(
+            info = item.info,
+            onLoaded = { detail ->
+                _uiState.update { state ->
+                    val current = state.detailItem
+                    if (current?.info?.id != detail.id) return@update state
+                    // README 还没回来时先用分片里的 description 顶上。
+                    val markdown = state.detailMarkdown
+                        ?.takeIf { it != fallback && it.isNotBlank() }
+                        ?: detail.description.ifBlank { detail.summary }.ifBlank { null }
+                    state.copy(
+                        detailItem = current.copy(
+                            info = detail,
+                            deviceSupported = detail.supportsDevice(),
+                        ),
+                        detailMarkdown = markdown,
+                    )
+                }
+            },
+        )
         val repo = item.info.repo
         if (repo.isBlank()) return
         viewModelScope.launch {
@@ -218,19 +257,35 @@ class PluginViewModel(
         }
     }
 
-    /** 下载 + 校验 + 安装一个商城插件。 */
+    /**
+     * 下载 + 校验 + 安装一个商城插件，版本按商店规则自动选：
+     * 未下架 + 插件 ABI ≤ 宿主 ABI + 有本平台包里最新的那个。
+     *
+     * 轻索引没有版本表，安装前先补一次明细分片。
+     */
     fun install(item: RepoPluginItem) {
         val context = appContext ?: return
         val id = item.info.id
         if (activeJobs[id]?.isActive == true) return
 
-        val (_, asset) = item.info.deviceAsset() ?: run {
-            setItemError(id, "当前设备不受支持")
-            return
-        }
-
         setItemProgress(id, 0, error = null)
         activeJobs[id] = viewModelScope.launch {
+            val detail = resolveDetail(item.info)
+            if (detail == null) {
+                activeJobs.remove(id)
+                setItemError(id, "插件版本信息加载失败")
+                setVersionsError(id, "插件版本信息加载失败")
+                return@launch
+            }
+            val version = detail.selectVersion()
+            val asset = version?.assetForDevice()?.second
+            if (version == null || asset == null) {
+                activeJobs.remove(id)
+                val message = "没有适配当前内核 ABI（$CURRENT_PLUGIN_ABI）的版本"
+                setItemError(id, message)
+                setVersionsError(id, message)
+                return@launch
+            }
             PluginInstaller.install(
                 context = context,
                 id = id,
@@ -252,9 +307,88 @@ class PluginViewModel(
                         )
                     }
                     rebuildItems()
+                    clearVersionsProgress(id)
                 },
                 onFailure = { error ->
                     activeJobs.remove(id)
+                    setItemError(id, error.message ?: error.javaClass.simpleName)
+                },
+            )
+        }
+    }
+
+    /**
+     * 打开「所有版本」页：先把轻索引里缺的版本表补上。
+     *
+     * 分片已在缓存里时同步出结果，不闪加载态。
+     */
+    fun loadVersions(id: String) {
+        val info = allPlugins.firstOrNull { it.id == id }
+        if (info == null) {
+            _uiState.update {
+                it.copy(
+                    versionsInfo = null,
+                    versionsInstalled = null,
+                    versionsProgress = null,
+                    versionsLoading = false,
+                    versionsError = "插件已不在索引里",
+                )
+            }
+            return
+        }
+        _uiState.update {
+            it.copy(
+                versionsInfo = info,
+                versionsInstalled = appContext?.let { context -> PluginStore.find(context, id) },
+                versionsProgress = null,
+                versionsLoading = info.versions.isEmpty() && info.detail.isNotBlank(),
+                versionsError = null,
+            )
+        }
+        ensureDetail(
+            info = info,
+            onLoaded = { detail ->
+                _uiState.update { state ->
+                    if (state.versionsInfo?.id != detail.id) return@update state
+                    state.copy(versionsInfo = detail, versionsLoading = false)
+                }
+            },
+            onError = { message -> setVersionsError(id, message) },
+        )
+    }
+
+    /** 在「所有版本」页安装指定版本（已下架 / ABI 不兼容的版本会被拒绝）。 */
+    fun installVersion(version: PluginVersion) {
+        val context = appContext ?: return
+        val info = _uiState.value.versionsInfo ?: return
+        val id = info.id
+        if (activeJobs[id]?.isActive == true) return
+        if (!version.isUsable()) {
+            setVersionsError(id, "这个版本不能装在本机（已下架或 ABI 高于内核）")
+            return
+        }
+        val asset = version.assetForDevice()?.second ?: run {
+            setVersionsError(id, "这个版本没有本平台的包")
+            return
+        }
+
+        setItemProgress(id, 0, error = null)
+        activeJobs[id] = viewModelScope.launch {
+            PluginInstaller.install(
+                context = context,
+                id = id,
+                asset = asset,
+                kernelRunning = kernelRunning,
+                onProgress = { progress -> setItemProgress(id, progress, error = null) },
+            ).fold(
+                onSuccess = {
+                    activeJobs.remove(id)
+                    rebuildItems()
+                    clearVersionsProgress(id)
+                },
+                onFailure = { error ->
+                    activeJobs.remove(id)
+                    setVersionsError(id, error.message ?: error.javaClass.simpleName)
                     setItemError(id, error.message ?: error.javaClass.simpleName)
                 },
             )
@@ -441,8 +575,57 @@ class PluginViewModel(
                 rebootNeeded = rebootNeeded,
                 uninstallPending = uninstallPending,
                 uninstallDialogVisible = uninstallDialogVisible,
+                // 版本页开着时跟着最新列表 / 注册表刷新，安装完能立刻显示新版本号。
+                versionsInfo = state.versionsInfo?.let { info -> pluginById[info.id] ?: info },
+                versionsInstalled = state.versionsInfo?.let { info -> installedById[info.id] },
             )
         }
+    }
+
+    /**
+     * 轻索引补版本表：已有版本或没有分片地址时直接回调，否则拉一次分片并写回索引缓存。
+     *
+     * 成功后重建列表，让 [PluginInfo] 换成带版本表的版本；每个调用方各自拿到结果
+     * （同一插件可能同时被详情弹窗与版本页打开，重复一次请求比回调丢失更简单可控）。
+     */
+    private fun ensureDetail(
+        info: PluginInfo,
+        onLoaded: (PluginInfo) -> Unit,
+        onError: (String) -> Unit = {},
+    ) {
+        if (info.versions.isNotEmpty() || info.detail.isBlank()) {
+            onLoaded(info)
+            return
+        }
+        detailCache[info.id]?.let {
+            onLoaded(it)
+            return
+        }
+        val base = registryUrl ?: return
+        viewModelScope.launch {
+            repository.fetchDetail(base, info.detail).fold(
+                onSuccess = { detail ->
+                    detailCache[detail.id] = detail
+                    allPlugins = allPlugins.map { if (it.id == detail.id) detail else it }
+                    rebuildItems()
+                    onLoaded(detail)
+                },
+                onFailure = { error ->
+                    onError(error.message ?: error.javaClass.simpleName)
+                },
+            )
+        }
+    }
+
+    /** 安装前取带版本表的 [PluginInfo]（轻索引要补一次分片）；失败返回 null。 */
+    private suspend fun resolveDetail(info: PluginInfo): PluginInfo? {
+        if (info.versions.isNotEmpty() || info.detail.isBlank()) return info
+        detailCache[info.id]?.let { return it }
+        val base = registryUrl ?: return null
+        val detail = repository.fetchDetail(base, info.detail).getOrNull() ?: return null
+        detailCache[detail.id] = detail
+        allPlugins = allPlugins.map { if (it.id == detail.id) detail else it }
+        return detail
     }
 
     /**
@@ -463,20 +646,46 @@ class PluginViewModel(
 
     private fun setItemProgress(id: String, progress: Int, error: String?) {
         _uiState.update { state ->
+            val onVersionsPage = state.versionsInfo?.id == id
             state.copy(
                 repoItems = state.repoItems.map {
                     if (it.info.id == id) it.copy(installProgress = progress, error = error) else it
                 },
+                versionsProgress = if (onVersionsPage) progress else state.versionsProgress,
+                versionsError = if (onVersionsPage) error else state.versionsError,
             )
+        }
+    }
+
+    private fun setVersionsError(id: String, message: String) {
+        _uiState.update { state ->
+            if (state.versionsInfo?.id != id) {
+                state
+            } else {
+                state.copy(versionsProgress = null, versionsError = message)
+            }
+        }
+    }
+
+    private fun clearVersionsProgress(id: String) {
+        _uiState.update { state ->
+            if (state.versionsInfo?.id != id) {
+                state
+            } else {
+                state.copy(versionsProgress = null, versionsError = null)
+            }
         }
     }
 
     private fun setItemError(id: String, message: String) {
         _uiState.update { state ->
+            val onVersionsPage = state.versionsInfo?.id == id
             state.copy(
                 repoItems = state.repoItems.map {
                     if (it.info.id == id) it.copy(installProgress = null, error = message) else it
                 },
+                versionsProgress = if (onVersionsPage) null else state.versionsProgress,
+                versionsError = if (onVersionsPage) message else state.versionsError,
             )
         }
     }

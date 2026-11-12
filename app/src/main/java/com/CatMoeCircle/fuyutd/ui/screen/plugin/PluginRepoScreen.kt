@@ -8,6 +8,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.CatMoeCircle.fuyutd.ui.LocalUiMode
 import com.CatMoeCircle.fuyutd.ui.UiMode
 import com.CatMoeCircle.fuyutd.ui.navigation3.LocalNavigator
+import com.CatMoeCircle.fuyutd.ui.navigation3.Route
 import com.CatMoeCircle.fuyutd.ui.viewmodel.LocalPluginViewModel
 import com.CatMoeCircle.fuyutd.ui.viewmodel.PluginViewModel
 
@@ -51,10 +52,14 @@ fun PluginRepoScreen(
         onDismissDetail = viewModel::dismissDetail,
     )
     val onBack = { navigator.pop() }
+    val onOpenVersions: (RepoPluginItem) -> Unit = { item ->
+        // 版本页自己会按需拉分片。
+        navigator.push(Route.PluginVersions(item.info.id))
+    }
 
     when (LocalUiMode.current) {
-        UiMode.Miuix -> PluginRepoScreenMiuix(uiState, actions, onBack)
-        UiMode.Material -> PluginRepoScreenMaterial(uiState, actions, onBack)
+        UiMode.Miuix -> PluginRepoScreenMiuix(uiState, actions, onBack, onOpenVersions)
+        UiMode.Material -> PluginRepoScreenMaterial(uiState, actions, onBack, onOpenVersions)
     }
 
     val detailItem = uiState.detailItem

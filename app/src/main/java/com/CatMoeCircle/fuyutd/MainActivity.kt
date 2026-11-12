@@ -73,6 +73,7 @@ import com.CatMoeCircle.fuyutd.ui.screen.home.HomeUiState
 import com.CatMoeCircle.fuyutd.ui.screen.log.LogPage
 import com.CatMoeCircle.fuyutd.ui.screen.plugin.PluginPage
 import com.CatMoeCircle.fuyutd.ui.screen.plugin.PluginRepoScreen
+import com.CatMoeCircle.fuyutd.ui.screen.plugin.PluginVersionsScreen
 import com.CatMoeCircle.fuyutd.ui.screen.settings.SettingPager
 import com.CatMoeCircle.fuyutd.ui.screen.config.TomlConfigScreen
 import com.CatMoeCircle.fuyutd.ui.screen.update.UpdateCheckScreen
@@ -237,6 +238,9 @@ class MainActivity : ComponentActivity() {
                             }
                             entry<Route.PluginRepo>(swipeDismiss = swipeDismiss) {
                                 PluginRepoScreen(isRunning = homeState.isRunning)
+                            }
+                            entry<Route.PluginVersions>(swipeDismiss = swipeDismiss) { key ->
+                                PluginVersionsScreen(pluginId = key.pluginId)
                             }
                         }
                     }

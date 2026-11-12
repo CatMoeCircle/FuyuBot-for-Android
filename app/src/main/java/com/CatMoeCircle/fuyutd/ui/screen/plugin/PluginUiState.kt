@@ -93,6 +93,20 @@ data class PluginUiState(
     val detailItem: RepoPluginItem? = null,
     /** 详情弹窗里展示的 Markdown 正文（README 或保底 description）。 */
     val detailMarkdown: String? = null,
+    /**
+     * 「所有版本」页当前展示的插件；null 表示没打开版本页。
+     *
+     * 轻索引里这个对象只有摘要，版本表要等明细分片回来才补齐。
+     */
+    val versionsInfo: PluginInfo? = null,
+    /** 「所有版本」页是否正在拉明细分片。 */
+    val versionsLoading: Boolean = false,
+    /** 「所有版本」页的加载 / 安装错误；成功或未操作时为 null。 */
+    val versionsError: String? = null,
+    /** 「所有版本」页对应插件的本地安装信息；未安装为 null。 */
+    val versionsInstalled: InstalledPlugin? = null,
+    /** 「所有版本」页的安装进度 0..100；null 表示没在安装。 */
+    val versionsProgress: Int? = null,
 )
 
 /**

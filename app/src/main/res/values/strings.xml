@@ -258,4 +258,20 @@
     <string name="plugin_refreshed">刷新完成</string>
     <string name="plugin_summary_empty">暂无简介</string>
     <string name="plugin_repo_id">ID: %1$s</string>
+
+    <!-- 插件商城的「所有版本」页（schema 2 明细分片里的版本表） -->
+    <string name="plugin_versions_title">所有版本</string>
+    <string name="plugin_versions_hint">当前内核插件 ABI 为 %1$d；未下架、ABI 不高于它且有本平台包的版本才能安装</string>
+    <string name="plugin_versions_empty">没有可用版本</string>
+    <string name="plugin_versions_load_failed">版本列表加载失败：%1$s</string>
+    <string name="plugin_versions_meta">ABI %1$d · %2$s · %3$s</string>
+    <string name="plugin_versions_abi">ABI %1$d</string>
+    <string name="plugin_versions_latest">最新</string>
+    <string name="plugin_versions_yanked">已下架</string>
+    <string name="plugin_versions_incompatible">不支持本机</string>
+    <string name="plugin_versions_no_platform">无本平台包</string>
+    <string name="plugin_versions_depends">依赖：%1$s</string>
+    <string name="plugin_versions_install">安装此版本</string>
+    <string name="plugin_choose_version">选择版本</string>
+    <string name="plugin_card_more">更多操作</string>
 </resources>

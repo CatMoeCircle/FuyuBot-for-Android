@@ -100,6 +100,7 @@ unzip -l app/build/outputs/apk/release/*.apk | grep assets/fuyubot-kernel
 | 上游仓库 | <https://github.com/CatMoeCircle/Fuyu-Bot> |
 | 内置内核版本 | 与 App 使用同一个 Release tag；正式构建时写入 `CURRENT_KERNEL_VERSION` |
 | JNI ABI | `1`（运行时校验，见 `Native.ABI_VERSION`） |
+| 插件 ABI | `6`（0.1.4 起；插件商店按它挑可装版本，见 `CURRENT_PLUGIN_ABI`） |
 | TDLib | `1.8.69`（commit `0e88653dcbf4e44c73cb655a05b58cd749a91169`） |
 | 目标 ABI | `arm64-v8a`（真机）/ `x86_64`（模拟器） |
 
@@ -324,6 +325,22 @@ unzip -o dist/fuyubot-v0.1.2-android-jni-arm64-v8a.zip \
   需要自行配置签名后再分发。
 - 产物位置：`app/build/outputs/apk/release/`。
 
+### 插件 ABI
+
+插件商店按「插件 ABI ≤ 宿主 ABI」挑版本，宿主 ABI 由构建时写入的常量决定：
+
+```kotlin
+// app/src/main/java/com/CatMoeCircle/fuyutd/data/plugin/PluginPlatform.kt
+const val CURRENT_PLUGIN_ABI = 6
+```
+
+- 当前值与 0.1.4 及之后的内核对应（ABI v5 → v6 见上游 `plugin/abi-v6`）。
+- **换入其他 ABI 的内核产物时，这个值必须一起改。** 改小会把能装的新版本判成不兼容
+  （版本页看不到、装不了）；改大会把 ABI 高于内核的版本当成可装，装上后内核加载失败。
+- 它不是设备 ABI：设备平台（`android-aarch64` / `android-x86_64`）在运行期由
+  `Build.SUPPORTED_ABIS` 映射，不需要在构建时传。
+- 选版相关函数都接受 `hostAbi` 参数（默认取该常量），需要临时验证别的 ABI 时可以直接传值。
+
 ### 构建后自检
 
 确认内核确实进了 APK：
@@ -335,6 +352,8 @@ unzip -l app/build/outputs/apk/release/*.apk \
 
 应能看到 `assets/fuyubot-kernel/libfuyubotjni.so`、`libtdjson.so`、`plugins/*.so` 等条目。
 看不到就说明内核没有放到指定目录，需要回到上一节重新放入后重新构建。
+
+再顺带确认 `CURRENT_PLUGIN_ABI` 与这份内核的插件 ABI 一致（见上一节）。
 
 ---
 
@@ -394,8 +413,8 @@ reply_prefix = "已安装："
 ## 版本与发布
 
 App 和内核按同一个 Release tag 绑定发布。正式构建时，上游发布流程会把新内核铺进
-`app/src/main/assets/fuyubot-kernel/`，并将 `CURRENT_KERNEL_VERSION` 与 App 的
-`versionName` 一起改写成该 tag，再构建和签名 APK。
+`app/src/main/assets/fuyubot-kernel/`，并按这份内核写入 `CURRENT_KERNEL_VERSION` 与
+`CURRENT_PLUGIN_ABI`（插件 ABI），App 的 `versionName` 也改成同一个 tag，再构建和签名 APK。
 
 用户只需要下载新版 APK 覆盖安装。App 启动时会比较已安装内核标记与
 `CURRENT_KERNEL_VERSION`；新 APK 内置的内核版本变化后会自动重装，版本一致则跳过。

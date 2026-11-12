@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -70,6 +72,7 @@ fun PluginRepoScreenMiuix(
     uiState: PluginUiState,
     actions: PluginScreenActions,
     onBack: () -> Unit,
+    onOpenVersions: (RepoPluginItem) -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
     val enableBlur = LocalEnableBlur.current
@@ -162,6 +165,7 @@ fun PluginRepoScreenMiuix(
                         uiState = uiState,
                         actions = actions,
                         nestedScrollConnection = scrollBehavior.nestedScrollConnection,
+                        onOpenVersions = onOpenVersions,
                     )
                 }
             }
@@ -220,6 +224,7 @@ private fun RepoListMiuix(
     uiState: PluginUiState,
     actions: PluginScreenActions,
     nestedScrollConnection: androidx.compose.ui.input.nestedscroll.NestedScrollConnection,
+    onOpenVersions: (RepoPluginItem) -> Unit,
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         when {
@@ -254,6 +259,7 @@ private fun RepoListMiuix(
                         RepoCardMiuix(
                             item = item,
                             onClick = { actions.onOpenDetail(item) },
+                            onOpenVersions = { onOpenVersions(item) },
                         )
                     }
                 }
@@ -266,8 +272,10 @@ private fun RepoListMiuix(
 private fun RepoCardMiuix(
     item: RepoPluginItem,
     onClick: () -> Unit,
+    onOpenVersions: () -> Unit,
 ) {
     val installed = item.installed
+    var showMore by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
@@ -279,22 +287,60 @@ private fun RepoCardMiuix(
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = item.info.name,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (installed != null) {
-                    Spacer(Modifier.width(8.dp))
-                    TagMiuix(
-                        text = stringResource(R.string.plugin_installed),
-                        background = colorScheme.secondaryContainer.copy(alpha = 0.8f),
-                        tint = colorScheme.onSecondaryContainer,
+                // 名称 + 已安装标签靠左；3 点菜单固定在最右边。
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = item.info.name,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
+                    if (installed != null) {
+                        Spacer(Modifier.width(8.dp))
+                        TagMiuix(
+                            text = stringResource(R.string.plugin_installed),
+                            background = colorScheme.secondaryContainer.copy(alpha = 0.8f),
+                            tint = colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
+                // 右上角 3 点菜单：版本表按需拉，入口放在卡片上。
+                Box {
+                    IconButton(onClick = { showMore = true }) {
+                        Icon(
+                            imageVector = Icons.Rounded.MoreVert,
+                            contentDescription = stringResource(R.string.plugin_card_more),
+                            tint = colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                    OverlayListPopup(
+                        show = showMore,
+                        alignment = PopupPositionProvider.Align.End,
+                        onDismissRequest = { showMore = false },
+                    ) {
+                        ListPopupColumn {
+                            DropdownImpl(
+                                item = DropdownItem(
+                                    text = stringResource(R.string.plugin_choose_version),
+                                ),
+                                optionSize = 1,
+                                isSelected = false,
+                                index = 0,
+                                isFirst = true,
+                                isLast = true,
+                                onSelectedIndexChange = {
+                                    showMore = false
+                                    onOpenVersions()
+                                },
+                            )
+                        }
+                    }
                 }
             }
 
