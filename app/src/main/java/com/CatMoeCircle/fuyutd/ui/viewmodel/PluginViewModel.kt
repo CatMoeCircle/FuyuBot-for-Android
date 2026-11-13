@@ -440,6 +440,9 @@ class PluginViewModel(
             ).fold(
                 onSuccess = {
                     activeJobs.remove(id)
+                    // 版本页安装的进度只属于版本页：仓库卡片如果还留着 100% 会一直显示，
+                    // 用户回到仓库 / 删掉插件后也清不掉，所以成功时一并清空。
+                    clearRepoInstallProgress(id)
                     rebuildItems()
                     clearVersionsProgress(id)
                 },
