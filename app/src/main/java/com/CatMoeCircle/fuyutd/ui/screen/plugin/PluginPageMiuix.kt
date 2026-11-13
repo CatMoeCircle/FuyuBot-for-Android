@@ -174,6 +174,7 @@ private fun InstalledListMiuix(
                         onRequestConfirmUninstall = actions.onRequestConfirmUninstall,
                         onRestoreUninstall = actions.onRestoreUninstall,
                         onUndoUninstall = actions.onUndoUninstall,
+                        onUpdate = actions.onUpdate,
                     )
                 }
                 // 内核报告只在真的有内容时才出区块：内核没跑 / 没拿到报告时列表保持原样。
@@ -197,9 +198,10 @@ private fun InstalledCardMiuix(
     item: InstalledPluginItem,
     onToggleEnabled: (InstalledPlugin, Boolean) -> Unit,
     onUninstall: (InstalledPlugin) -> Unit,
-    onRequestConfirmUninstall: () -> Unit,
-    onRestoreUninstall: () -> Unit,
+    onRequestConfirmUninstall: (String) -> Unit,
+    onRestoreUninstall: (String) -> Unit,
     onUndoUninstall: (InstalledPlugin) -> Unit,
+    onUpdate: (InstalledPluginItem) -> Unit,
 ) {
     val installed = item.installed
     // 名称 / 简介优先用商城索引；断网或本地导入的插件回退到 plugin.json 里的信息。
@@ -209,11 +211,15 @@ private fun InstalledCardMiuix(
     val kernel = item.kernel
     val pendingConfirm = item.confirmUninstall
     val struck = installed.pendingUninstall || pendingConfirm
+    // 商城里有更新 / 正在更新 / 上次更新失败；三者都为空时卡片跟以前一样。
+    val updateVersion = item.updateVersion
+    val updateProgress = item.updateProgress
+    val updateError = item.updateError
     val textDecoration = if (struck) TextDecoration.LineThrough else null
     // 运行中已标记待卸载 → 撤销；停止时已划掉 → 确认卸载；否则先划掉。
     val deleteAction: () -> Unit = when {
         installed.pendingUninstall -> ({ onUndoUninstall(installed) })
-        pendingConfirm -> onRequestConfirmUninstall
+        pendingConfirm -> ({ onRequestConfirmUninstall(installed.id) })
         else -> ({ onUninstall(installed) })
     }
     var expanded by remember(installed.id) { mutableStateOf(false) }
@@ -325,6 +331,16 @@ private fun InstalledCardMiuix(
                 )
             }
 
+            // 上次更新失败：跟内核错误一样用错误色小字，再点「更新」即可重试。
+            if (updateError != null) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.plugin_update_failed, updateError),
+                    fontSize = 12.sp,
+                    color = colorScheme.error,
+                )
+            }
+
             HorizontalDivider(
                 modifier = Modifier.padding(vertical = 8.dp),
                 thickness = 0.5.dp,
@@ -334,7 +350,7 @@ private fun InstalledCardMiuix(
             Row {
                 Spacer(Modifier.weight(1f))
                 if (pendingConfirm) {
-                    IconButton(onClick = onRestoreUninstall) {
+                    IconButton(onClick = { onRestoreUninstall(installed.id) }) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = MiuixIcons.Undo,
@@ -349,6 +365,47 @@ private fun InstalledCardMiuix(
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 14.sp,
                             )
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
+                // 有新版时给「更新」；正在更新就原地换成进度文字，避免重复点。
+                if (updateVersion != null && !struck) {
+                    if (updateProgress != null) {
+                        Text(
+                            text = stringResource(R.string.plugin_updating, updateProgress),
+                            // 更新中同样用主题蓝，和「更新」按钮的强调色保持一致。
+                            color = colorScheme.primary,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .align(Alignment.CenterVertically)
+                                .padding(horizontal = 12.dp),
+                        )
+                    } else {
+                        // 用主题蓝的实心胶囊，让「更新」在灰色禁用/卸载按钮里一眼可见。
+                        IconButton(onClick = { onUpdate(item) }) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(colorScheme.primary)
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = MiuixIcons.Download,
+                                    contentDescription = null,
+                                    tint = colorScheme.onPrimary,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = stringResource(R.string.plugin_update),
+                                    color = colorScheme.onPrimary,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 13.sp,
+                                )
+                            }
                         }
                     }
                     Spacer(Modifier.width(8.dp))

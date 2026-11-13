@@ -4,6 +4,7 @@ import com.CatMoeCircle.fuyutd.data.kernel.KernelPluginInfo
 import com.CatMoeCircle.fuyutd.data.kernel.KernelSkippedPlugin
 import com.CatMoeCircle.fuyutd.data.plugin.InstalledPlugin
 import com.CatMoeCircle.fuyutd.data.plugin.PluginInfo
+import com.CatMoeCircle.fuyutd.data.plugin.PluginVersion
 
 /**
  * 插件商城索引的加载状态。
@@ -43,6 +44,16 @@ data class InstalledPluginItem(
      * 此时卡片划掉、按钮变成「确认卸载」，点它才会弹出确认弹窗。
      */
     val confirmUninstall: Boolean = false,
+    /**
+     * 商城索引里比本地版本新、且按商店规则能在本机安装的版本；没有更新为 null。
+     *
+     * 由 PluginViewModel 选版后填入，界面据此显示「更新」。
+     */
+    val updateVersion: PluginVersion? = null,
+    /** 更新安装进度 0..100；null 表示没在更新。 */
+    val updateProgress: Int? = null,
+    /** 最近一次更新失败的错误；成功或未操作时为 null。 */
+    val updateError: String? = null,
 )
 
 /**
@@ -81,14 +92,14 @@ data class PluginUiState(
     /** 是否有本地插件因增删/启停而需要重启内核生效。 */
     val rebootNeeded: Boolean = false,
     /**
-     * 内核停止时已点过「卸载」、等待确认删除的插件；null 表示没有。
+     * 内核停止时已点过「卸载」、等待确认删除的插件 id 集合（可以同时划掉多个）。
      *
      * 与运行中的 [InstalledPlugin.pendingUninstall] 不同：这里只是界面上的待确认状态，
      * 不会落盘，也不参与「内核停止后自动删除」；只有点「确认卸载」弹窗里的「确认」才会真正删除。
      */
-    val uninstallPending: InstalledPlugin? = null,
-    /** 是否正在显示「确认卸载」弹窗。 */
-    val uninstallDialogVisible: Boolean = false,
+    val uninstallPendingIds: Set<String> = emptySet(),
+    /** 正在显示「确认卸载」弹窗的插件 id；null 表示弹窗没开。 */
+    val uninstallDialogId: String? = null,
     /** 详情弹窗当前展示的插件；null 表示未打开详情。 */
     val detailItem: RepoPluginItem? = null,
     /** 详情弹窗里展示的 Markdown 正文（README 或保底 description）。 */
@@ -119,11 +130,13 @@ data class PluginScreenActions(
     val onOpenRepo: () -> Unit,
     val onToggleEnabled: (InstalledPlugin, Boolean) -> Unit,
     val onUninstall: (InstalledPlugin) -> Unit,
-    /** 内核停止时，已划掉的插件点「确认卸载」：弹出确认弹窗。 */
-    val onRequestConfirmUninstall: () -> Unit,
+    /** 内核停止时，已划掉的插件点「确认卸载」：按插件 id 弹出确认弹窗。 */
+    val onRequestConfirmUninstall: (String) -> Unit,
     /** 内核停止时，把划掉的卡片还原回正常状态。 */
-    val onRestoreUninstall: () -> Unit,
+    val onRestoreUninstall: (String) -> Unit,
     val onUndoUninstall: (InstalledPlugin) -> Unit,
+    /** 本地插件有新版时点「更新」：升级到 [InstalledPluginItem.updateVersion]。 */
+    val onUpdate: (InstalledPluginItem) -> Unit,
     val onToggleExpanded: (RepoPluginItem) -> Unit,
     val onInstall: (RepoPluginItem) -> Unit,
     val onToggleRepoOnlySupported: () -> Unit,

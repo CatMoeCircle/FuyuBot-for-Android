@@ -44,6 +44,7 @@ fun PluginRepoScreen(
         onRequestConfirmUninstall = viewModel::requestUninstallConfirm,
         onRestoreUninstall = viewModel::restoreUninstall,
         onUndoUninstall = viewModel::undoUninstall,
+        onUpdate = viewModel::update,
         onToggleExpanded = viewModel::toggleExpanded,
         onInstall = viewModel::install,
         onToggleRepoOnlySupported = viewModel::toggleRepoOnlySupported,
@@ -77,7 +78,7 @@ fun PluginRepoScreen(
                 detailItem.installed?.let { plugin ->
                     actions.onUninstall(plugin)
                     // 停止时没有卡片可点「确认卸载」，直接接着弹确认窗（等价于划掉后再确认）。
-                    if (!isRunning) viewModel.requestUninstallConfirm()
+                    if (!isRunning) viewModel.requestUninstallConfirm(plugin.id)
                 }
                 actions.onDismissDetail()
             },
@@ -85,9 +86,12 @@ fun PluginRepoScreen(
     }
 
     // 内核停止时删除不可恢复：先划掉，再点「确认卸载」弹窗确认；运行中删除走「待卸载 + 撤销」。
+    val uninstallTarget = uiState.uninstallDialogId?.let { id ->
+        uiState.installed.firstOrNull { it.installed.id == id }?.installed
+    }
     PluginUninstallDialog(
-        pending = uiState.uninstallPending,
-        visible = uiState.uninstallDialogVisible,
+        pending = uninstallTarget,
+        visible = uninstallTarget != null,
         onDismiss = viewModel::dismissUninstallDialog,
         onConfirm = viewModel::confirmUninstall,
     )

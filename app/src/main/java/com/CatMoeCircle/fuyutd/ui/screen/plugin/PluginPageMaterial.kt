@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -27,6 +28,8 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -159,6 +162,7 @@ private fun InstalledListMaterial(
                         onRequestConfirmUninstall = actions.onRequestConfirmUninstall,
                         onRestoreUninstall = actions.onRestoreUninstall,
                         onUndoUninstall = actions.onUndoUninstall,
+                        onUpdate = actions.onUpdate,
                     )
                 }
                 // 内核报告只在真的有内容时才出区块：内核没跑 / 没拿到报告时列表保持原样。
@@ -182,9 +186,10 @@ private fun InstalledCardMaterial(
     item: InstalledPluginItem,
     onToggleEnabled: (InstalledPlugin, Boolean) -> Unit,
     onUninstall: (InstalledPlugin) -> Unit,
-    onRequestConfirmUninstall: () -> Unit,
-    onRestoreUninstall: () -> Unit,
+    onRequestConfirmUninstall: (String) -> Unit,
+    onRestoreUninstall: (String) -> Unit,
     onUndoUninstall: (InstalledPlugin) -> Unit,
+    onUpdate: (InstalledPluginItem) -> Unit,
 ) {
     val installed = item.installed
     // 名称 / 简介优先用商城索引；断网或本地导入的插件回退到 plugin.json 里的信息。
@@ -198,7 +203,7 @@ private fun InstalledCardMaterial(
     // 运行中已标记待卸载 → 撤销；停止时已划掉 → 确认卸载；否则先划掉。
     val deleteAction: () -> Unit = when {
         installed.pendingUninstall -> ({ onUndoUninstall(installed) })
-        pendingConfirm -> onRequestConfirmUninstall
+        pendingConfirm -> ({ onRequestConfirmUninstall(installed.id) })
         else -> ({ onUninstall(installed) })
     }
     var expanded by remember(installed.id) { mutableStateOf(false) }
@@ -260,6 +265,17 @@ private fun InstalledCardMaterial(
                 )
             }
 
+            // 更新失败：核心记下的错误原样提示一行，成功 / 再次更新时核心会清掉。
+            val updateError = item.updateError
+            if (updateError != null) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.plugin_update_failed, updateError),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
             if (installed.pendingRestart || installed.pendingUninstall) {
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -311,9 +327,41 @@ private fun InstalledCardMaterial(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                // 有新版才出「更新」；更新进行中同一位置改成进度文字，不可点击。
+                val updateProgress = item.updateProgress
+                if (updateProgress != null) {
+                    Text(
+                        text = stringResource(R.string.plugin_updating, updateProgress),
+                        style = MaterialTheme.typography.bodyMedium,
+                        // 更新中同样用主题蓝，和「更新」按钮的强调色保持一致。
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                } else if (item.updateVersion != null && !struck) {
+                    // 主题蓝的实心按钮：灰色禁用 / 卸载按钮旁边一眼能看见。
+                    Button(
+                        onClick = { onUpdate(item) },
+                        modifier = Modifier.defaultMinSize(minWidth = 52.dp, minHeight = 32.dp),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                        shape = ButtonDefaults.textShape,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.CloudDownload,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.plugin_update),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
                 if (pendingConfirm) {
-                    FilledTonalButton(onClick = onRestoreUninstall) {
+                    FilledTonalButton(onClick = { onRestoreUninstall(installed.id) }) {
                         Icon(
                             imageVector = Icons.Rounded.Sync,
                             contentDescription = null,

@@ -19,6 +19,7 @@ import com.CatMoeCircle.fuyutd.data.plugin.assetForDevice
 import com.CatMoeCircle.fuyutd.data.plugin.isUsable
 import com.CatMoeCircle.fuyutd.data.plugin.selectVersion
 import com.CatMoeCircle.fuyutd.data.plugin.supportsDevice
+import com.CatMoeCircle.fuyutd.data.update.compareVersion
 import com.CatMoeCircle.fuyutd.ui.screen.plugin.InstalledPluginItem
 import com.CatMoeCircle.fuyutd.ui.screen.plugin.PluginLoadStatus
 import com.CatMoeCircle.fuyutd.ui.screen.plugin.PluginUiState
@@ -64,6 +65,9 @@ class PluginViewModel(
     /** 已拉到的明细分片（轻索引本身没有版本表）。 */
     private val detailCache = mutableMapOf<String, PluginInfo>()
 
+    /** 已安装插件在商城里的可更新版本（id → 目标版本）；没算出更新的 id 不在表里。 */
+    private var updateTargets: Map<String, PluginVersion> = emptyMap()
+
     private val activeJobs = mutableMapOf<String, Job>()
 
     init {
@@ -98,6 +102,8 @@ class PluginViewModel(
             reload()
         } else {
             rebuildItems()
+            // 从仓库页装完 / 隔一会儿回来时补一次更新检查。
+            refreshUpdateInfo()
         }
     }
 
@@ -117,6 +123,8 @@ class PluginViewModel(
      */
     fun reload() {
         val context = appContext ?: return
+        // 重新拉索引前先收起旧的「更新」标记，避免网络失败后界面还提示能更新。
+        updateTargets = emptyMap()
         _uiState.update {
             it.copy(loading = true, loadStatus = PluginLoadStatus.Loading, loadError = null)
         }
@@ -168,6 +176,7 @@ class PluginViewModel(
                         it.copy(loadStatus = PluginLoadStatus.Success, loadError = null)
                     }
                     rebuildItems()
+                    refreshUpdateInfo()
                 },
                 onFailure = { error ->
                     _uiState.update {
@@ -318,6 +327,52 @@ class PluginViewModel(
     }
 
     /**
+     * 点本地插件卡片上的「更新」：把 [InstalledPluginItem.updateVersion] 装到本机。
+     *
+     * 复用商城的下载 / 校验 / 安装流程；内核运行中安装会标记「待重启」，
+     * 卡片上的「重启后生效」与顶栏重启按钮沿现有逻辑提示。更新完重新做一次
+     * 更新检查，按钮随即消失。用户停用过的插件更新后保持停用。
+     */
+    fun update(item: InstalledPluginItem) {
+        val context = appContext ?: return
+        val installed = item.installed
+        val id = installed.id
+        if (activeJobs[id]?.isActive == true) return
+        val target = item.updateVersion ?: return
+        val asset = target.assetForDevice()?.second
+        if (asset == null) {
+            setUpdateError(id, "这个版本没有本平台的包")
+            return
+        }
+
+        setUpdateProgress(id, 0)
+        activeJobs[id] = viewModelScope.launch {
+            PluginInstaller.install(
+                context = context,
+                id = id,
+                asset = asset,
+                kernelRunning = kernelRunning,
+                onProgress = { progress -> setUpdateProgress(id, progress) },
+            ).fold(
+                onSuccess = { updated ->
+                    activeJobs.remove(id)
+                    setUpdateProgress(id, null)
+                    // 目录包总是装到「启用」位置；原来停用的插件更新后要挪回停用位置。
+                    if (!installed.enabled) {
+                        PluginInstaller.setEnabled(context, updated, enabled = false, kernelRunning)
+                    }
+                    rebuildItems()
+                    refreshUpdateInfo()
+                },
+                onFailure = { error ->
+                    activeJobs.remove(id)
+                    setUpdateError(id, error.message ?: error.javaClass.simpleName)
+                },
+            )
+        }
+    }
+
+    /**
      * 打开「所有版本」页：先把轻索引里缺的版本表补上。
      *
      * 分片已在缓存里时同步出结果，不闪加载态。
@@ -400,19 +455,22 @@ class PluginViewModel(
      *
      * - 内核运行中：标记「待卸载」，并把插件挪到停用位置——重启内核后不会再加载它；
      *   文件等内核停止后再删，界面可「撤销」；
-     * - 内核未运行：先把卡片划掉、按钮变成「确认卸载」（[uninstallPending]），
-     *   真正删除要等用户点「确认卸载」并在弹窗里再确认一次。
+     * - 内核未运行：先把卡片划掉、按钮变成「确认卸载」（[uninstallPendingIds]），
+     *   可以同时划掉多个；真正删除要等用户点「确认卸载」并在弹窗里再确认一次。
      */
     fun uninstall(installed: InstalledPlugin) {
         val context = appContext ?: return
         val id = installed.id
         if (activeJobs[id]?.isActive == true) return
         // 已经是待卸载 / 待确认状态，重复点「卸载」不应覆盖原状态（例如仓库页详情）。
-        if (installed.pendingUninstall || installed.id == _uiState.value.uninstallPending?.id) return
+        if (installed.pendingUninstall || id in _uiState.value.uninstallPendingIds) return
 
         if (!kernelRunning) {
             _uiState.update {
-                it.copy(uninstallPending = installed, uninstallDialogVisible = false)
+                it.copy(
+                    uninstallPendingIds = it.uninstallPendingIds + id,
+                    uninstallDialogId = null,
+                )
             }
             // 重新算一遍列表，让卡片立刻变成「划掉 + 确认卸载」。
             rebuildItems()
@@ -427,21 +485,26 @@ class PluginViewModel(
         }
     }
 
-    /** 点「确认卸载」：为已划掉的插件弹出确认弹窗。 */
-    fun requestUninstallConfirm() {
-        if (_uiState.value.uninstallPending == null) return
-        _uiState.update { it.copy(uninstallDialogVisible = true) }
+    /** 点「确认卸载」：为指定的、已划掉的插件弹出确认弹窗。 */
+    fun requestUninstallConfirm(id: String) {
+        if (id !in _uiState.value.uninstallPendingIds) return
+        _uiState.update { it.copy(uninstallDialogId = id) }
     }
 
     /** 关掉「确认卸载」弹窗；已划掉的状态保留，可稍后再点「确认卸载」。 */
     fun dismissUninstallDialog() {
-        _uiState.update { it.copy(uninstallDialogVisible = false) }
+        _uiState.update { it.copy(uninstallDialogId = null) }
     }
 
-    /** 点「还原」：取消划掉/待确认状态，插件恢复原样。 */
-    fun restoreUninstall() {
-        if (_uiState.value.uninstallPending == null) return
-        _uiState.update { it.copy(uninstallPending = null, uninstallDialogVisible = false) }
+    /** 点「还原」：只取消这个插件的划掉/待确认状态，其它已划掉的插件保持不变。 */
+    fun restoreUninstall(id: String) {
+        if (id !in _uiState.value.uninstallPendingIds) return
+        _uiState.update {
+            it.copy(
+                uninstallPendingIds = it.uninstallPendingIds - id,
+                uninstallDialogId = it.uninstallDialogId?.takeIf { dialogId -> dialogId != id },
+            )
+        }
         rebuildItems()
     }
 
@@ -452,8 +515,17 @@ class PluginViewModel(
      */
     fun confirmUninstall() {
         val context = appContext ?: return
-        val installed = _uiState.value.uninstallPending ?: return
-        _uiState.update { it.copy(uninstallPending = null, uninstallDialogVisible = false) }
+        val id = _uiState.value.uninstallDialogId ?: return
+        val installed = _uiState.value.installed
+            .firstOrNull { it.installed.id == id }
+            ?.installed
+            ?: return
+        _uiState.update {
+            it.copy(
+                uninstallPendingIds = it.uninstallPendingIds - id,
+                uninstallDialogId = null,
+            )
+        }
         // 先恢复卡片（万一下面的删除失败，界面也不会一直停在「确认卸载」）。
         rebuildItems()
 
@@ -545,16 +617,23 @@ class PluginViewModel(
         val kernelPlugins = kernelReport?.plugins.orEmpty()
         val pluginDirPath = KernelManager.runtimePluginDir(context).absolutePath
         val matchedKernel = mutableSetOf<KernelPluginInfo>()
-        val stagedId = state.uninstallPending?.id
+        val stagedIds = state.uninstallPendingIds
+        val previousInstalled = state.installed.associateBy { it.installed.id }
         val installedItems = PluginStore.installedIncludingSystem(context).map { registered ->
             val kernelInfo = kernelPlugins
                 .firstOrNull { it !in matchedKernel && it.matches(pluginDirPath, registered) }
                 ?.also { matchedKernel += it }
+            val previous = previousInstalled[registered.id]
             InstalledPluginItem(
                 installed = registered,
                 info = pluginById[registered.id],
                 kernel = kernelInfo,
-                confirmUninstall = registered.id == stagedId,
+                confirmUninstall = registered.id in stagedIds,
+                // 目标版本仍要高于本地版本才算更新：刚升级完按钮会立刻消失。
+                updateVersion = updateTargets[registered.id]
+                    ?.takeIf { compareVersion(it.version, registered.version) > 0 },
+                updateProgress = previous?.updateProgress,
+                updateError = previous?.updateError,
             )
         }
         // 内核里有、注册表里对应不上的条目：单独列出，不要因为匹配不上就丢掉。
@@ -562,9 +641,12 @@ class PluginViewModel(
 
         val rebootNeeded = installedItems.any { it.installed.pendingRestart || it.installed.pendingUninstall }
 
-        // 划掉待确认的插件跟着最新注册表刷新；已经不在列表里（例如别处删掉了）就收起弹窗。
-        val uninstallPending = installedItems.firstOrNull { it.confirmUninstall }?.installed
-        val uninstallDialogVisible = uninstallPending != null && state.uninstallDialogVisible
+        // 划掉待确认的插件跟着最新注册表刷新：已经不在列表里（例如别处删掉了）的自动移出待确认。
+        val uninstallPendingIds = installedItems.asSequence()
+            .filter { it.confirmUninstall }
+            .map { it.installed.id }
+            .toSet()
+        val uninstallDialogId = state.uninstallDialogId?.takeIf { it in uninstallPendingIds }
 
         _uiState.update {
             it.copy(
@@ -573,12 +655,35 @@ class PluginViewModel(
                 kernelOrphans = kernelOrphans,
                 repoItems = repoItems,
                 rebootNeeded = rebootNeeded,
-                uninstallPending = uninstallPending,
-                uninstallDialogVisible = uninstallDialogVisible,
+                uninstallPendingIds = uninstallPendingIds,
+                uninstallDialogId = uninstallDialogId,
                 // 版本页开着时跟着最新列表 / 注册表刷新，安装完能立刻显示新版本号。
                 versionsInfo = state.versionsInfo?.let { info -> pluginById[info.id] ?: info },
                 versionsInstalled = state.versionsInfo?.let { info -> installedById[info.id] },
             )
+        }
+    }
+
+    /**
+     * 已安装插件的更新检查：对索引里的插件补齐版本表，挑出比本地新且本机可装的版本。
+     *
+     * 轻索引（schema 2）没有版本表，按需拉明细分片；结果写回 [updateTargets]，
+     * 由 [rebuildItems] 挂到卡片上。断网 / 分片缺失只是不提示更新，不影响其它功能。
+     */
+    private fun refreshUpdateInfo() {
+        val context = appContext ?: return
+        viewModelScope.launch {
+            val targets = mutableMapOf<String, PluginVersion>()
+            PluginStore.installed(context).forEach { installed ->
+                val info = allPlugins.firstOrNull { it.id == installed.id } ?: return@forEach
+                val detail = resolveDetail(info) ?: return@forEach
+                val target = detail.selectVersion() ?: return@forEach
+                if (compareVersion(target.version, installed.version) > 0) {
+                    targets[installed.id] = target
+                }
+            }
+            updateTargets = targets
+            if (loaded) rebuildItems()
         }
     }
 
@@ -642,6 +747,39 @@ class PluginViewModel(
         if (fileName.isBlank()) return false
         val base = "$pluginDirPath/$fileName"
         return path == base || path.startsWith("$base/") || file == fileName
+    }
+
+    /** 清掉仓库卡片上残留的安装进度（版本页安装不在仓库卡片上展示进度）。 */
+    private fun clearRepoInstallProgress(id: String) {
+        _uiState.update { state ->
+            state.copy(
+                repoItems = state.repoItems.map {
+                    if (it.info.id == id) it.copy(installProgress = null) else it
+                },
+            )
+        }
+    }
+
+    /** 只改某个已安装插件的更新进度，不重建整张列表。 */
+    private fun setUpdateProgress(id: String, progress: Int?) {
+        _uiState.update { state ->
+            state.copy(
+                installed = state.installed.map {
+                    if (it.installed.id == id) it.copy(updateProgress = progress, updateError = null) else it
+                },
+            )
+        }
+    }
+
+    /** 记录一次更新失败；卡片上显示原因，可以进行中的进度一并清掉。 */
+    private fun setUpdateError(id: String, message: String) {
+        _uiState.update { state ->
+            state.copy(
+                installed = state.installed.map {
+                    if (it.installed.id == id) it.copy(updateProgress = null, updateError = message) else it
+                },
+            )
+        }
     }
 
     private fun setItemProgress(id: String, progress: Int, error: String?) {

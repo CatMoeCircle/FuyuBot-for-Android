@@ -240,6 +240,10 @@
     <string name="plugin_uninstall_confirm_message">删除后会删除该插件的数据目录，依赖这个插件的插件可能会加载失败</string>
     <string name="plugin_uninstall_confirm_action">确认</string>
     <string name="plugin_restart_needed">重启后生效</string>
+    <string name="plugin_update">更新</string>
+    <string name="plugin_updating">正在更新 %1$d%%</string>
+    <string name="plugin_update_failed">更新失败：%1$s</string>
+    <string name="plugin_installing">正在安装 %1$d%%</string>
     <string name="plugin_store_disabled">插件商城已关闭：fuyubot.toml 中 plugins.registry_url 为空</string>
     <string name="plugin_pending_uninstall">待卸载</string>
     <string name="plugin_supported_platforms">仅支持以下平台</string>
