@@ -273,6 +273,7 @@
     <string name="plugin_versions_latest">最新</string>
     <string name="plugin_versions_yanked">已下架</string>
     <string name="plugin_versions_incompatible">不支持本机</string>
+    <string name="plugin_versions_abi_incompatible">此ABI 不兼容</string>
     <string name="plugin_versions_no_platform">无本平台包</string>
     <string name="plugin_versions_depends">依赖：%1$s</string>
     <string name="plugin_versions_install">安装此版本</string>

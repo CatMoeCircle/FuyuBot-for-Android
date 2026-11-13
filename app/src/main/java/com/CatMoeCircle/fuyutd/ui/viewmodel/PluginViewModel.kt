@@ -396,6 +396,7 @@ class PluginViewModel(
                 versionsInfo = info,
                 versionsInstalled = appContext?.let { context -> PluginStore.find(context, id) },
                 versionsProgress = null,
+                versionsInstallingVersion = null,
                 versionsLoading = info.versions.isEmpty() && info.detail.isNotBlank(),
                 versionsError = null,
             )
@@ -428,6 +429,7 @@ class PluginViewModel(
         }
 
         setItemProgress(id, 0, error = null)
+        _uiState.update { it.copy(versionsInstallingVersion = version.version) }
         activeJobs[id] = viewModelScope.launch {
             PluginInstaller.install(
                 context = context,
@@ -800,7 +802,11 @@ class PluginViewModel(
             if (state.versionsInfo?.id != id) {
                 state
             } else {
-                state.copy(versionsProgress = null, versionsError = message)
+                state.copy(
+                    versionsProgress = null,
+                    versionsError = message,
+                    versionsInstallingVersion = null,
+                )
             }
         }
     }
@@ -810,7 +816,11 @@ class PluginViewModel(
             if (state.versionsInfo?.id != id) {
                 state
             } else {
-                state.copy(versionsProgress = null, versionsError = null)
+                state.copy(
+                    versionsProgress = null,
+                    versionsError = null,
+                    versionsInstallingVersion = null,
+                )
             }
         }
     }

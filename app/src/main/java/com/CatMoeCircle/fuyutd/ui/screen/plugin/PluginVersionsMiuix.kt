@@ -1,5 +1,7 @@
 package com.CatMoeCircle.fuyutd.ui.screen.plugin
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,8 +13,10 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
@@ -21,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,7 +45,6 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
@@ -142,29 +146,14 @@ private fun VersionListMiuix(
                 )
             }
         }
-        val progress = uiState.versionsProgress
-        if (progress != null) {
-            item(key = "progress") {
-                Column(modifier = Modifier.padding(horizontal = 4.dp)) {
-                    LinearProgressIndicator(
-                        progress = progress / 100f,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = stringResource(R.string.plugin_downloading, progress),
-                        fontSize = 12.sp,
-                        color = colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-            }
-        }
         // 版本表按版本号升序，界面上新的排前面。
         items(versions.asReversed(), key = { it.version }) { version ->
             VersionCardMiuix(
                 version = version,
                 latest = version.version == latest,
                 installed = version.version == installedVersion,
+                installing = version.version == uiState.versionsInstallingVersion,
+                progress = uiState.versionsProgress,
                 onInstall = { actions.onInstall(version) },
             )
         }
@@ -176,14 +165,22 @@ private fun VersionCardMiuix(
     version: PluginVersion,
     latest: Boolean,
     installed: Boolean,
+    installing: Boolean,
+    progress: Int?,
     onInstall: () -> Unit,
 ) {
     val asset = version.assetForDevice()
     val usable = version.isUsable()
-    val unusableReason = when {
+    // 插件 ABI 与宿主 ABI 是硬切关系：低版本 ABI 的插件在新内核里同样加载不了。
+    // 它是「兼容性提示」，和 isUsable（商店的 abi ≤ 宿主规则）分开判断：ABI 不同的版本
+    // 即使还能点安装，也要像「最新」一样挂标签提醒。
+    val abiIncompatible = version.abi > 0 && version.abi != CURRENT_PLUGIN_ABI
+    val statusReason = when {
         version.yanked -> R.string.plugin_versions_yanked
+        abiIncompatible -> R.string.plugin_versions_abi_incompatible
         asset == null -> R.string.plugin_versions_no_platform
-        else -> R.string.plugin_versions_incompatible
+        !usable -> R.string.plugin_versions_incompatible
+        else -> null
     }
 
     Card(
@@ -218,10 +215,11 @@ private fun VersionCardMiuix(
                         tint = colorScheme.onSecondaryContainer,
                     )
                 }
-                if (!usable) {
+                // 兼容性提示放在「最新」前面，窄屏上也不会被后面的标签挤掉。
+                if (statusReason != null) {
                     Spacer(Modifier.width(8.dp))
                     VersionTagMiuix(
-                        text = stringResource(unusableReason),
+                        text = stringResource(statusReason),
                         background = colorScheme.errorContainer.copy(alpha = 0.8f),
                         tint = colorScheme.onErrorContainer,
                     )
@@ -256,7 +254,10 @@ private fun VersionCardMiuix(
                 )
             }
 
-            if (usable && !installed) {
+            if (installing) {
+                // 安装中：按钮位置换成填充式进度条，安装期间不可点击。
+                InstallProgressButtonMiuix(progress = progress ?: 0)
+            } else if (usable && !installed) {
                 MiuixTextButton(
                     text = stringResource(R.string.plugin_versions_install),
                     onClick = onInstall,
@@ -267,6 +268,46 @@ private fun VersionCardMiuix(
                 )
             }
         }
+    }
+}
+
+/**
+ * 安装进度按钮：外层保留按钮圆角，内部按 progress/100 的宽度用 primary 填充，
+ * 文字居中显示「正在安装 N%」。安装期间不可点击，高度与普通按钮一致。
+ */
+@Composable
+private fun InstallProgressButtonMiuix(progress: Int) {
+    val percent = progress.coerceIn(0, 100)
+    val fraction by animateFloatAsState(
+        targetValue = percent / 100f,
+        animationSpec = tween(durationMillis = 300),
+        label = "miuix-install-progress",
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .height(40.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(colorScheme.primary.copy(alpha = 0.16f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(fraction)
+                .align(Alignment.CenterStart)
+                .background(colorScheme.primary),
+        )
+        Text(
+            text = stringResource(R.string.plugin_installing, percent),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            // 填充过半后文字落在 primary 上，用 onPrimary 保证对比度；否则落在浅色轨道上。
+            color = if (fraction > 0.5f) colorScheme.onPrimary else colorScheme.primary,
+            maxLines = 1,
+        )
     }
 }
 

@@ -118,6 +118,8 @@ data class PluginUiState(
     val versionsInstalled: InstalledPlugin? = null,
     /** 「所有版本」页的安装进度 0..100；null 表示没在安装。 */
     val versionsProgress: Int? = null,
+    /** 「所有版本」页正在安装的版本号；null 表示没在安装。 */
+    val versionsInstallingVersion: String? = null,
 )
 
 /**
