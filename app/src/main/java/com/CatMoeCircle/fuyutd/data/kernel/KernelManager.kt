@@ -1,7 +1,10 @@
 package com.CatMoeCircle.fuyutd.data.kernel
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.res.AssetManager
+import androidx.core.content.edit
+import com.CatMoeCircle.fuyutd.data.AppPrefs
 import com.CatMoeCircle.fuyutd.data.FuyuBotConfigRepository
 import com.CatMoeCircle.fuyutd.data.plugin.PluginStore
 import com.CatMoeCircle.fuyutd.data.update.CURRENT_KERNEL_VERSION
@@ -33,7 +36,7 @@ import java.nio.file.Files
  * 运行期数据、日志与插件放在应用专属外置存储（`Android/data/<包名>/files/`），
  * 用户可以通过文件管理器直接查看和调整，内核升级也不会丢：
  * - `fuyubot-data/`     ← TDLib 数据库（登录态）
- * - `fuyubot-plugins/`  ← 用户可编辑的插件目录（内置插件也装到这里，已存在则不覆盖）
+ * - `fuyubot-plugins/`  ← 用户可编辑的插件目录（官方插件也装到这里，APK 更新后按资产覆盖）
  * - `logs/`             ← 运行日志
  *
  * 外置目录里的动态库不能直接交给内核加载，所以启动前会把插件同步到
@@ -66,6 +69,9 @@ object KernelManager {
 
     /** 资产里插件所在子目录（`assets/fuyubot-kernel/plugins/`）。 */
     private const val ASSET_PLUGIN_DIR = "plugins"
+
+    /** 官方插件同步标记：记录上次把资产插件写进插件目录时的 APK 安装时间。 */
+    private const val BUNDLED_PLUGINS_STAMP = "bundled_plugins_stamp"
 
     /** 旧布局：这些子目录原先都塞在内核安装目录里。 */
     private const val LEGACY_DATA_DIR = "data"
@@ -290,6 +296,9 @@ object KernelManager {
             if (isInstalled(context) &&
                 compareVersion(installedVersion(context).orEmpty(), CURRENT_KERNEL_VERSION) >= 0
             ) {
+                // 内核没变，但 APK 可能是覆盖安装的新版本：官方插件接口随内核走，
+                // 旧文件不换掉会被新内核当成加载失败的插件，所以这里单独再同步一次。
+                syncBundledPlugins(context)
                 return@runCatching
             }
             installFromAssets(context, onProgress)
@@ -355,6 +364,7 @@ object KernelManager {
             // 保证安装目录只剩内核本体，内核升级时不会连带清掉插件。
             installPackagedPlugins(File(staging, ASSET_PLUGIN_DIR), pluginDir(context))
             File(staging, ASSET_PLUGIN_DIR).deleteRecursively()
+            recordBundledPluginsStamp(context)
 
             File(staging, VERSION_FILE).writeText(CURRENT_KERNEL_VERSION)
 
@@ -372,20 +382,87 @@ object KernelManager {
     }
 
     /**
-     * 把资产里的内置插件复制到插件目录。
+     * 把官方插件从 [source]（资产解压出来的目录）写进插件目录。
      *
-     * 同名文件已存在时**不覆盖**——那通常是用户从插件仓库装的更新版本，冲掉会丢用户的选择。
-     * 外置目录保持可写，启动前同步到私有副本时再统一设为只读。
+     * 官方插件与内核是同一份 ABI，旧文件在新内核里会加载失败，所以**同名文件一律覆盖**：
+     * 这些文件名只可能来自 App 资产，用户从插件商店装的是 `plugins/<id>/` 目录包，
+     * 不会被这里碰到。用户停用过的官方插件（`<name>.so.disable`）保持在停用位置，
+     * 只换内容，不擅自替用户重新启用。
+     *
+     * 先写 `<name>.so.new` 再改名，避免复制中途失败留下半截 `.so` 让内核加载崩溃。
      */
     private fun installPackagedPlugins(source: File, target: File) {
         if (!source.isDirectory) return
         target.mkdirs()
         source.listFiles()?.filter { it.isFile }?.forEach { file ->
-            val dest = File(target, file.name)
-            if (dest.exists()) return@forEach
-            file.copyTo(dest, overwrite = false)
+            val dest = bundledPluginDestination(target, file.name)
+            val temp = File(target, file.name + ".new")
+            file.copyTo(temp, overwrite = true)
+            if (!temp.renameTo(dest)) {
+                temp.copyTo(dest, overwrite = true)
+                temp.delete()
+            }
         }
     }
+
+    /** 官方插件的落盘位置：用户停用过的保持在 `.so.disable`，否则用启用位置。 */
+    private fun bundledPluginDestination(target: File, name: String): File {
+        val enabled = File(target, name)
+        if (enabled.exists()) return enabled
+        val disabled = File(target, name + PluginStore.DISABLE_SUFFIX)
+        return if (disabled.exists()) disabled else enabled
+    }
+
+    /**
+     * APK 覆盖安装 / 升级后，把资产里的官方插件重写进插件目录。
+     *
+     * [ensureCurrent] 在「内核版本已经是最新」时会直接返回，不再走 [installFromAssets]；
+     * 而官方插件是随 APK 换的，接口变更后旧文件会让内核加载失败。这里以 APK 的安装时间
+     * （`PackageInfo.lastUpdateTime`）为标记，标记变了就同步一次，没变就什么都不做。
+     *
+     * 失败不抛出：插件没同步上最多是这轮仍用旧文件，不能把内核安装 / 启动拦下来。
+     */
+    internal fun syncBundledPlugins(context: Context) {
+        runCatching {
+            val stamp = apkInstallStamp(context)
+            if (stamp == 0L) return
+            val prefs = AppPrefs.prefs()
+            if (prefs.getLong(BUNDLED_PLUGINS_STAMP, 0L) == stamp) return
+            val staging = File(context.cacheDir, "fuyubot-plugins-staging")
+            try {
+                staging.deleteRecursively()
+                staging.mkdirs()
+                listAssetFiles(context.assets, "$ASSET_DIR/$ASSET_PLUGIN_DIR").forEach { assetPath ->
+                    val name = assetPath.substringAfterLast('/')
+                    context.assets.open(assetPath).use { input ->
+                        File(staging, name).outputStream().buffered().use { input.copyTo(it) }
+                    }
+                }
+                installPackagedPlugins(staging, pluginDir(context))
+                prefs.edit { putLong(BUNDLED_PLUGINS_STAMP, stamp) }
+            } finally {
+                staging.deleteRecursively()
+            }
+        }
+    }
+
+    /** 记录本次 APK 安装时间，避免下次启动重复同步官方插件。 */
+    private fun recordBundledPluginsStamp(context: Context) {
+        runCatching {
+            val stamp = apkInstallStamp(context)
+            if (stamp != 0L) {
+                AppPrefs.prefs().edit { putLong(BUNDLED_PLUGINS_STAMP, stamp) }
+            }
+        }
+    }
+
+    /** APK 本次安装 / 更新时间；查询失败时返回 0，表示不触发同步。 */
+    private fun apkInstallStamp(context: Context): Long = runCatching {
+        context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.PackageInfoFlags.of(0L),
+        ).lastUpdateTime
+    }.getOrDefault(0L)
 
     /**
      * 递归列出资产目录下的全部文件，返回相对 assets 根的路径

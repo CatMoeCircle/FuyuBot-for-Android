@@ -398,6 +398,9 @@ class FuyuBotRuntime {
                 ensureLoaded(context).getOrThrow()
                 val handle = native!!
                 if (!handle.nativeIsRunning()) {
+                    // 覆盖安装后官方插件可能刚被换成新版本，必须在建私有只读副本前同步好，
+                    // 否则内核这一轮加载的还是旧接口的插件。
+                    KernelManager.syncBundledPlugins(context)
                     KernelManager.syncRuntimePlugins(context, config.pluginDir).getOrThrow()
                 }
                 val code = handle.nativeStart(config.optionsJson)
