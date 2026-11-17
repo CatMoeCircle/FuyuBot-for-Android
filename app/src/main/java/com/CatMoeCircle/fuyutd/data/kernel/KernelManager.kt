@@ -11,13 +11,14 @@ import com.CatMoeCircle.fuyutd.data.update.CURRENT_KERNEL_VERSION
 import com.CatMoeCircle.fuyutd.data.update.compareVersion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import java.nio.file.Files
 
 /**
  * 内置内核（Fuyu-Bot 运行时）的本地安装管理。
  *
- * 内核以 **JNI 动态库**形式分发（`libfuyubotjni.so` + `libtdjson.so` + 插件目录下的若干 so），
+ * 内核以 **JNI 动态库**形式分发（`libfuyubotjni.so` + `libtdjson.so` + `plugins/` 下的内置插件），
  * 而不是可执行文件——Android 10+ 的 W^X 限制禁止执行应用私有目录下的二进制，
  * 但允许 `System.load()` 加载同一目录下的 `.so`，所以这条路线不需要 root。
  *
@@ -67,7 +68,7 @@ object KernelManager {
     /** 交给内核的私有 root 入口，指向用户可访问的外置存储目录。 */
     private const val RUNTIME_ROOT_DIR = "fuyubot-runtime"
 
-    /** 资产里插件所在子目录（`assets/fuyubot-kernel/plugins/`）。 */
+    /** 资产里插件所在子目录（`assets/fuyubot-kernel/plugins/`，平铺 `.so` 或 `<id>/plugin.json` 目录包）。 */
     private const val ASSET_PLUGIN_DIR = "plugins"
 
     /** 官方插件同步标记：记录上次把资产插件写进插件目录时的 APK 安装时间。 */
@@ -328,7 +329,9 @@ object KernelManager {
                 require(path.isNotEmpty() && path.split('/').none { it == ".." }) {
                     "内核资产中存在非法路径：$assetPath"
                 }
-                if (path.startsWith("$ASSET_PLUGIN_DIR/") && path.endsWith(".so")) {
+                // 内置插件既可能是旧版平铺的 `<name>.so`，也可能是目录包
+                // （`plugins/<id>/plugin.json` + `bin/`，内核 0.1.7 起），统一按「plugins/ 下有文件」计数。
+                if (path.startsWith("$ASSET_PLUGIN_DIR/")) {
                     packagedPlugins++
                 }
                 // 防目录穿越：归一化后的路径必须落在目标目录内。
@@ -348,21 +351,17 @@ object KernelManager {
 
             require(File(staging, MAIN_LIBRARY).isFile) { "内核资产中缺少 $MAIN_LIBRARY" }
             require(File(staging, TDLIB_LIBRARY).isFile) { "内核资产中缺少 $TDLIB_LIBRARY" }
-            // 资产里有插件就必须落到 plugins/ 下；落不了说明资产内的目录结构异常，
-            // 与其装成一个「插件全丢」的内核，不如当场失败。
-            if (packagedPlugins > 0) {
-                val installed = File(staging, ASSET_PLUGIN_DIR)
-                    .listFiles()
-                    ?.count { it.isFile && it.name.endsWith(".so") }
-                    ?: 0
-                require(installed > 0) {
-                    "插件未落到 $ASSET_PLUGIN_DIR 目录，请检查内核资产内的目录结构"
-                }
-            }
-
             // 内置插件装到安装目录**之外**的新插件目录，再把 staging 里的插件目录删掉，
             // 保证安装目录只剩内核本体，内核升级时不会连带清掉插件。
-            installPackagedPlugins(File(staging, ASSET_PLUGIN_DIR), pluginDir(context))
+            val installedPlugins = installPackagedPlugins(File(staging, ASSET_PLUGIN_DIR), pluginDir(context))
+            // 资产里有插件就必须落到 plugins/ 下；一个都没认出来说明资产内的目录结构异常，
+            // 与其装成一个「插件全丢」的内核，不如当场失败。
+            if (packagedPlugins > 0) {
+                require(installedPlugins > 0) {
+                    "插件未落到 $ASSET_PLUGIN_DIR 目录，请检查内核资产内的目录结构" +
+                        "（$ASSET_PLUGIN_DIR/<id>/${PluginStore.MANIFEST_FILE} 目录包或平铺的 .so）"
+                }
+            }
             File(staging, ASSET_PLUGIN_DIR).deleteRecursively()
             recordBundledPluginsStamp(context)
 
@@ -384,26 +383,76 @@ object KernelManager {
     /**
      * 把官方插件从 [source]（资产解压出来的目录）写进插件目录。
      *
-     * 官方插件与内核是同一份 ABI，旧文件在新内核里会加载失败，所以**同名文件一律覆盖**：
-     * 这些文件名只可能来自 App 资产，用户从插件商店装的是 `plugins/<id>/` 目录包，
-     * 不会被这里碰到。用户停用过的官方插件（`<name>.so.disable`）保持在停用位置，
-     * 只换内容，不擅自替用户重新启用。
+     * 认两种落盘形态：
+     * - 旧版平铺：`plugins/<name>.so`，按文件复制；
+     * - 目录包（内核 0.1.7 起上游内置插件的标准形态）：`plugins/<id>/plugin.json` + `bin/<entry>.so`，
+     *   整包复制到 `plugins/<id>/`，用户停用过的继续留在 `plugins/.disabled/<id>/`。
      *
-     * 先写 `<name>.so.new` 再改名，避免复制中途失败留下半截 `.so` 让内核加载崩溃。
+     * 官方插件与内核是同一份 ABI，旧文件在新内核里会加载失败，所以内容一律覆盖：
+     * 这些文件只可能来自 App 资产，用户从插件商店装的是 `plugins/<id>/` 目录包，
+     * 不会被这里碰到。用户停用过的官方插件保持在停用位置，只换内容，不擅自替用户重新启用。
+     *
+     * 平铺形态先写 `<name>.so.new` 再改名，避免复制中途失败留下半截 `.so` 让内核加载崩溃。
+     *
+     * @return 实际装进去的插件个数（平铺文件 + 目录包）。
      */
-    private fun installPackagedPlugins(source: File, target: File) {
-        if (!source.isDirectory) return
+    private fun installPackagedPlugins(source: File, target: File): Int {
+        if (!source.isDirectory) return 0
         target.mkdirs()
-        source.listFiles()?.filter { it.isFile }?.forEach { file ->
-            val dest = bundledPluginDestination(target, file.name)
-            val temp = File(target, file.name + ".new")
-            file.copyTo(temp, overwrite = true)
-            if (!temp.renameTo(dest)) {
-                temp.copyTo(dest, overwrite = true)
-                temp.delete()
+        var installed = 0
+        source.listFiles().orEmpty().forEach { child ->
+            when {
+                child.isFile -> {
+                    val dest = bundledPluginDestination(target, child.name)
+                    val temp = File(target, child.name + ".new")
+                    child.copyTo(temp, overwrite = true)
+                    if (!temp.renameTo(dest)) {
+                        temp.copyTo(dest, overwrite = true)
+                        temp.delete()
+                    }
+                    installed++
+                }
+                child.isDirectory && File(child, PluginStore.MANIFEST_FILE).isFile -> {
+                    installBundledPluginDir(child, target)
+                    installed++
+                }
             }
         }
+        return installed
     }
+
+    /**
+     * 装一个目录包：整包替换到启用位置；用户停用过的继续放在 `plugins/.disabled/<id>/`。
+     *
+     * 停用状态有两个来源：目录包形态的 `plugins/.disabled/<id>/`，以及旧版平铺形态的
+     * `<entry>.so.disable`——从旧内核升级上来时，用户的停用选择要跟着带到目录包形态。
+     * 装完删掉旧版平铺的同名入口（`<entry>.so` / `<entry>.so.disable`），
+     * 否则内核会把同一个内置插件当成两个候选加载。
+     *
+     * 目录名必须与 `plugin.json` 的 id 一致（内核会校验包名与清单），资产里的包名即 id。
+     */
+    private fun installBundledPluginDir(source: File, target: File) {
+        val id = source.name
+        val entryName = readBundleEntry(source)?.substringAfterLast('/')?.ifEmpty { null }
+        val disabled = File(File(target, PluginStore.DISABLED_DIR), id)
+        val legacyDisabled = entryName != null &&
+            File(target, entryName + ".so" + PluginStore.DISABLE_SUFFIX).isFile
+        val destination = if (disabled.isDirectory || legacyDisabled) disabled else File(target, id)
+        destination.deleteRecursively()
+        destination.parentFile?.mkdirs()
+        source.copyRecursively(destination, overwrite = true)
+        if (entryName != null) {
+            File(target, entryName + ".so").delete()
+            File(target, entryName + ".so" + PluginStore.DISABLE_SUFFIX).delete()
+        }
+    }
+
+    /** 目录包清单里的入口路径（相对包根，如 `bin/fuyubot_plugin_start.so`）；读不到返回 null。 */
+    private fun readBundleEntry(source: File): String? = runCatching {
+        JSONObject(File(source, PluginStore.MANIFEST_FILE).readText())
+            .optString("entry")
+            .takeIf { it.isNotBlank() }
+    }.getOrNull()
 
     /** 官方插件的落盘位置：用户停用过的保持在 `.so.disable`，否则用启用位置。 */
     private fun bundledPluginDestination(target: File, name: String): File {
@@ -432,10 +481,13 @@ object KernelManager {
             try {
                 staging.deleteRecursively()
                 staging.mkdirs()
-                listAssetFiles(context.assets, "$ASSET_DIR/$ASSET_PLUGIN_DIR").forEach { assetPath ->
-                    val name = assetPath.substringAfterLast('/')
+                // 目录包必须保留 `<id>/plugin.json` + `bin/` 的相对结构，不能拍平成文件名。
+                val assetsRoot = "$ASSET_DIR/$ASSET_PLUGIN_DIR"
+                listAssetFiles(context.assets, assetsRoot).forEach { assetPath ->
+                    val output = File(staging, assetPath.removePrefix("$assetsRoot/"))
+                    output.parentFile?.mkdirs()
                     context.assets.open(assetPath).use { input ->
-                        File(staging, name).outputStream().buffered().use { input.copyTo(it) }
+                        output.outputStream().buffered().use { input.copyTo(it) }
                     }
                 }
                 installPackagedPlugins(staging, pluginDir(context))

@@ -112,7 +112,8 @@ fuyubot-<版本>-android-jni-<abi>.zip
 ├─ libtdjson.so            ← TDLib，必须与主库同 ABI
 ├─ libc++_shared.so        ← tdjson 的运行时依赖
 ├─ libcrypto.so / libssl.so
-├─ plugins/*.so            ← 可选内置插件（/start、/help、/plugins）
+├─ plugins/<id>/plugin.json ← 内置插件目录包清单（0.1.7 起）
+├─ plugins/<id>/bin/*.so   ← 内置插件入口（/start、/help、/plugins）
 ├─ include/fuyubot_jni.h   ← C 接口头文件（可选）
 └─ README.txt
 ```
@@ -143,7 +144,7 @@ app/src/main/assets/fuyubot-kernel/
 | `libc++_shared.so` | ✅ | tdjson 的运行时依赖，缺了设备上会报 `library not found` |
 | `libcrypto.so` | ✅ | tdjson 的运行时依赖（文件名以产物为准） |
 | `libssl.so` | ✅ | tdjson 的运行时依赖（文件名以产物为准） |
-| `plugins/fuyubot_plugin_start.so`<br>`plugins/fuyubot_plugin_help.so`<br>`plugins/fuyubot_plugin_manage.so` | 建议 | 内置命令插件；缺失时内核仍可启动，但没有 `/start`、`/help`、`/plugins` |
+| `plugins/fuyubot.start/`<br>`plugins/fuyubot.help/`<br>`plugins/fuyubot.manage/` | 建议 | 内置命令插件目录包（`plugin.json` + `bin/<入口>.so`）；缺失时内核仍可启动，但没有 `/start`、`/help`、`/plugins` |
 | `include/fuyubot_jni.h` | 可选 | C 接口契约，仅供查阅，运行时不读 |
 | `README.txt` | 可选 | 上游包说明 |
 
@@ -161,13 +162,23 @@ app/src/main/assets/fuyubot-kernel/
 ├── libcrypto.so
 ├── libssl.so
 ├── plugins/
-│   ├── fuyubot_plugin_start.so
-│   ├── fuyubot_plugin_help.so
-│   └── fuyubot_plugin_manage.so
+│   ├── fuyubot.start/
+│   │   ├── plugin.json
+│   │   └── bin/fuyubot_plugin_start.so
+│   ├── fuyubot.help/
+│   │   ├── plugin.json
+│   │   └── bin/fuyubot_plugin_help.so
+│   └── fuyubot.manage/
+│       ├── plugin.json
+│       └── bin/fuyubot_plugin_manage.so
 ├── include/
 │   └── fuyubot_jni.h
 └── README.txt
 ```
+
+> 内置插件按上游分发形态原样放：0.1.7 起是标准目录包（`plugins/<id>/plugin.json` + `bin/`），
+> 旧版的平铺 `plugins/*.so` 也仍然可用——`KernelManager` 两种都会装进用户插件目录。
+> 目录包不要拍平到 `plugins/` 一层（清单和 `bin/` 必须留在包里），否则 App 认不出它。
 
 ### 放入指定目录
 
@@ -192,6 +203,7 @@ Expand-Archive -Force fuyubot-v0.1.2-android-jni-arm64-v8a.zip `
 ```bash
 test -f app/src/main/assets/fuyubot-kernel/libfuyubotjni.so \
   && test -f app/src/main/assets/fuyubot-kernel/libtdjson.so \
+  && test -d app/src/main/assets/fuyubot-kernel/plugins \
   && echo "kernel assets OK"
 ```
 
@@ -350,7 +362,7 @@ unzip -l app/build/outputs/apk/release/*.apk \
   | grep 'assets/fuyubot-kernel'
 ```
 
-应能看到 `assets/fuyubot-kernel/libfuyubotjni.so`、`libtdjson.so`、`plugins/*.so` 等条目。
+应能看到 `assets/fuyubot-kernel/libfuyubotjni.so`、`libtdjson.so`、`plugins/<id>/plugin.json` 等条目。
 看不到就说明内核没有放到指定目录，需要回到上一节重新放入后重新构建。
 
 再顺带确认 `CURRENT_PLUGIN_ABI` 与这份内核的插件 ABI 一致（见上一节）。
@@ -428,6 +440,11 @@ App 和内核按同一个 Release tag 绑定发布。正式构建时，上游发
 **Q：编译通过了，但安装后启动提示「资产中缺少内核目录」？**
 内核没有放进 `app/src/main/assets/fuyubot-kernel/`。按[构建前提](#构建前提内核产物必须放入指定目录)
 放入 `.so` 文件后重新构建。
+
+**Q：启动报「插件未落到 plugins 目录，请检查内核资产内的目录结构」？**
+资产里的内置插件是 0.1.7 的目录包（`plugins/<id>/plugin.json` + `bin/`），而旧版 App
+只把 `plugins/` 第一层的 `.so` 当插件，于是把目录包当成了「一个都没装上」。新版 App
+已同时支持目录包与平铺 `.so`；升级 App 或按上文核对资产目录即可。
 
 **Q：`java.lang.UnsatisfiedLinkError` / `dlopen failed: library ... not found`？**
 依次检查：内核文件是否齐全（尤其 `libc++_shared.so`、`libcrypto.so`、`libssl.so`）；
